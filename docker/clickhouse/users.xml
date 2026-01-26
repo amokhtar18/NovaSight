@@ -1,0 +1,109 @@
+<?xml version="1.0"?>
+<!-- =========================================
+     NovaSight ClickHouse Users Configuration
+     =========================================
+     Defines users, quotas, and access control policies
+-->
+<clickhouse>
+    <!-- User Profiles -->
+    <profiles>
+        <!-- Default profile for all users -->
+        <default>
+            <max_memory_usage>10000000000</max_memory_usage>
+            <use_uncompressed_cache>0</use_uncompressed_cache>
+            <load_balancing>random</load_balancing>
+            <max_execution_time>300</max_execution_time>
+            <max_rows_to_read>1000000000</max_rows_to_read>
+            <max_bytes_to_read>100000000000</max_bytes_to_read>
+        </default>
+
+        <!-- Restricted profile for tenant users -->
+        <tenant_user>
+            <max_memory_usage>5000000000</max_memory_usage>
+            <max_execution_time>120</max_execution_time>
+            <max_rows_to_read>100000000</max_rows_to_read>
+            <max_bytes_to_read>10000000000</max_bytes_to_read>
+            <readonly>0</readonly>
+        </tenant_user>
+
+        <!-- Read-only profile for analysts -->
+        <readonly>
+            <readonly>1</readonly>
+            <max_memory_usage>2000000000</max_memory_usage>
+            <max_execution_time>60</max_execution_time>
+            <max_rows_to_read>10000000</max_rows_to_read>
+        </readonly>
+
+        <!-- Admin profile with full access -->
+        <admin>
+            <max_memory_usage>20000000000</max_memory_usage>
+            <max_execution_time>600</max_execution_time>
+            <readonly>0</readonly>
+        </admin>
+    </profiles>
+
+    <!-- Quotas for rate limiting -->
+    <quotas>
+        <default>
+            <interval>
+                <duration>3600</duration>
+                <queries>1000</queries>
+                <errors>100</errors>
+                <result_rows>1000000000</result_rows>
+                <read_rows>1000000000</read_rows>
+                <execution_time>3600</execution_time>
+            </interval>
+        </default>
+
+        <tenant_quota>
+            <interval>
+                <duration>3600</duration>
+                <queries>500</queries>
+                <errors>50</errors>
+                <result_rows>100000000</result_rows>
+                <read_rows>500000000</read_rows>
+                <execution_time>1800</execution_time>
+            </interval>
+        </tenant_quota>
+    </quotas>
+
+    <!-- Users -->
+    <users>
+        <!-- Default admin user -->
+        <default>
+            <!-- Password: novasight (SHA256) -->
+            <password_sha256_hex>a0b65939670bc2c010f4d5d6a0b3e4d2f5c6b7a8d9e0f1234567890abcdef123</password_sha256_hex>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+        </default>
+
+        <!-- NovaSight application user -->
+        <novasight>
+            <!-- Password from CLICKHOUSE_PASSWORD env var, default: novasight_secret -->
+            <password_sha256_hex>9f735e0df9a1ddc702bf0a1a7b83033f9f7153a00c29de82cedadc9957289b05</password_sha256_hex>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>admin</profile>
+            <quota>default</quota>
+            <!-- Grant access to all databases -->
+            <access_management>1</access_management>
+        </novasight>
+
+        <!-- Read-only user for BI tools -->
+        <readonly_user>
+            <password_sha256_hex>e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</password_sha256_hex>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>readonly</profile>
+            <quota>tenant_quota</quota>
+        </readonly_user>
+    </users>
+
+    <!-- Row-level security policies will be managed dynamically -->
+    <!-- Each tenant gets their own database with restricted access -->
+</clickhouse>

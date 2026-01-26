@@ -1,0 +1,69 @@
+# NovaSight Development Overrides
+# =================================
+# This file contains development-specific overrides
+# It's automatically loaded by docker-compose
+
+version: '3.8'
+
+services:
+  # ============================================
+  # Backend - Development Mode
+  # ============================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      FLASK_ENV: development
+      FLASK_DEBUG: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./backend:/app
+      - backend_venv:/app/.venv
+    command: flask run --host=0.0.0.0 --reload --debug
+
+  # ============================================
+  # Frontend - Development Mode with HMR
+  # ============================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    environment:
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+
+  # ============================================
+  # Airflow - Debug Mode
+  # ============================================
+  airflow-webserver:
+    environment:
+      AIRFLOW__WEBSERVER__RELOAD_ON_PLUGIN_CHANGE: "true"
+      AIRFLOW__LOGGING__LOGGING_LEVEL: DEBUG
+
+  airflow-scheduler:
+    environment:
+      AIRFLOW__LOGGING__LOGGING_LEVEL: DEBUG
+
+  # ============================================
+  # Spark - Reduced Resources for Dev
+  # ============================================
+  spark-worker-1:
+    environment:
+      SPARK_WORKER_MEMORY: 1G
+      SPARK_WORKER_CORES: 1
+
+  spark-worker-2:
+    environment:
+      SPARK_WORKER_MEMORY: 1G
+      SPARK_WORKER_CORES: 1
+
+volumes:
+  backend_venv:
+    name: novasight-backend-venv

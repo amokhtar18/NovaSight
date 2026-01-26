@@ -1,0 +1,38 @@
+<clickhouse>
+    <!-- NovaSight ClickHouse Configuration -->
+    
+    <!-- Listen on all interfaces -->
+    <listen_host>::</listen_host>
+    <listen_host>0.0.0.0</listen_host>
+    
+    <!-- HTTP interface -->
+    <http_port>8123</http_port>
+    
+    <!-- Native protocol -->
+    <tcp_port>9000</tcp_port>
+    
+    <!-- Logging -->
+    <logger>
+        <level>information</level>
+        <log>/var/log/clickhouse-server/clickhouse-server.log</log>
+        <errorlog>/var/log/clickhouse-server/clickhouse-server.err.log</errorlog>
+        <size>100M</size>
+        <count>10</count>
+    </logger>
+    
+    <!-- Memory limits -->
+    <max_memory_usage>10000000000</max_memory_usage>
+    <max_memory_usage_for_user>5000000000</max_memory_usage_for_user>
+    
+    <!-- Query settings -->
+    <max_query_size>1048576</max_query_size>
+    <max_ast_elements>50000</max_ast_elements>
+    
+    <!-- Timeouts -->
+    <receive_timeout>300</receive_timeout>
+    <send_timeout>300</send_timeout>
+    <keep_alive_timeout>10</keep_alive_timeout>
+    
+    <!-- Max connections -->
+    <max_connections>100</max_connections>
+</clickhouse>

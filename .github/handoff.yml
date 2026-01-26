@@ -1,0 +1,529 @@
+# NovaSight Agent Handoff Configuration
+# ======================================
+# Defines task routing rules between specialized agents
+# Reference: https://docs.github.com/en/copilot/customizing-copilot/copilot-extensions/agents
+
+version: "1.0"
+project: novasight
+
+# ============================================
+# AGENT DEFINITIONS
+# ============================================
+agents:
+  # Master Orchestrator - coordinates all agents
+  novasight-orchestrator:
+    model: opus 4.5
+    description: "Master orchestrator that coordinates all specialized agents"
+    file: ".github/agents/novasight-orchestrator.agent.md"
+    capabilities:
+      - phase_management
+      - agent_delegation
+      - dependency_resolution
+      - integration_oversight
+      - progress_tracking
+
+  # Infrastructure Agent
+  infrastructure:
+    model: sonnet 4.5
+    description: "DevOps, Docker, Kubernetes, CI/CD, database configuration"
+    file: ".github/agents/infrastructure-agent.agent.md"
+    capabilities:
+      - docker_compose
+      - kubernetes_manifests
+      - helm_charts
+      - ci_cd_pipelines
+      - database_setup
+      - monitoring_infrastructure
+
+  # Backend Agent
+  backend:
+    model: opus 4.5
+    description: "Flask API, SQLAlchemy models, business logic, authentication"
+    file: ".github/agents/backend-agent.agent.md"
+    capabilities:
+      - flask_api
+      - sqlalchemy_models
+      - rest_endpoints
+      - authentication
+      - authorization
+      - business_logic
+
+  # Frontend Agent
+  frontend:
+    model: sonnet 4.5
+    description: "React components, TypeScript, UI/UX implementation"
+    file: ".github/agents/frontend-agent.agent.md"
+    capabilities:
+      - react_components
+      - typescript
+      - state_management
+      - ui_ux
+      - forms
+      - routing
+
+  # Template Engine Agent
+  template-engine:
+    model: opus 4.5
+    description: "Jinja2 templates for code generation (DAGs, PySpark, dbt)"
+    file: ".github/agents/template-engine-agent.agent.md"
+    capabilities:
+      - jinja2_templates
+      - code_generation
+      - template_validation
+      - schema_validation
+    critical: true  # Security-critical - no arbitrary code generation
+
+  # Data Sources Agent
+  data-sources:
+    model: sonnet 4.5
+    description: "Database connections, schema introspection, connection testing"
+    file: ".github/agents/data-sources-agent.agent.md"
+    capabilities:
+      - database_connectors
+      - schema_introspection
+      - connection_pooling
+      - credential_encryption
+
+  # dbt Agent
+  dbt:
+    model: sonnet 4.5
+    description: "dbt models, semantic layer, data transformations"
+    file: ".github/agents/dbt-agent.agent.md"
+    capabilities:
+      - dbt_models
+      - semantic_layer
+      - data_lineage
+      - transformations
+      - model_testing
+
+  # Orchestration Agent
+  orchestration:
+    model: sonnet 4.5
+    description: "Airflow DAGs, scheduling, workflow management"
+    file: ".github/agents/orchestration-agent.agent.md"
+    capabilities:
+      - airflow_dags
+      - dag_builder
+      - scheduling
+      - task_operators
+      - run_monitoring
+
+  # Dashboard Agent
+  dashboard:
+    model: sonnet 4.5
+    description: "Analytics dashboards, charts, visualizations, SQL editor"
+    file: ".github/agents/dashboard-agent.agent.md"
+    capabilities:
+      - dashboard_builder
+      - chart_components
+      - visualizations
+      - sql_editor
+      - query_interface
+
+  # AI Agent
+  ai:
+    model: opus 4.5
+    description: "Ollama integration, NL2SQL, natural language processing"
+    file: ".github/agents/ai-agent.agent.md"
+    capabilities:
+      - ollama_integration
+      - nl2sql
+      - llm_prompts
+      - intent_classification
+
+  # Admin Agent
+  admin:
+    model: haiku 4.5
+    description: "Tenant management, user management, RBAC, admin portal"
+    file: ".github/agents/admin-agent.agent.md"
+    capabilities:
+      - tenant_management
+      - user_management
+      - rbac
+      - quotas
+      - admin_dashboard
+
+  # Testing Agent
+  testing:
+    model: sonnet 4.5
+    description: "Unit tests, integration tests, E2E tests, test coverage"
+    file: ".github/agents/testing-agent.agent.md"
+    capabilities:
+      - pytest
+      - vitest
+      - playwright
+      - test_coverage
+      - test_fixtures
+
+  # Security Agent
+  security:
+    model: opus 4.5
+    description: "Security review, encryption, audit logging, hardening"
+    file: ".github/agents/security-agent.agent.md"
+    capabilities:
+      - security_review
+      - encryption
+      - audit_logging
+      - credential_management
+      - penetration_testing
+    critical: true
+
+# ============================================
+# HANDOFF RULES
+# ============================================
+handoff_rules:
+  # Infrastructure tasks
+  - patterns:
+      - "docker|dockerfile|compose"
+      - "kubernetes|k8s|helm"
+      - "ci/cd|github actions|pipeline"
+      - "terraform|infrastructure"
+      - "database setup|postgres init|clickhouse init"
+      - "monitoring|prometheus|grafana"
+      - "logging|elk|loki"
+    target: infrastructure
+    prompts:
+      - "001-init-infrastructure.md"
+      - "002-database-setup.md"
+      - "037-cicd-pipeline.md"
+      - "038-kubernetes-manifests.md"
+      - "039-helm-charts.md"
+      - "040-monitoring-setup.md"
+      - "041-logging-infrastructure.md"
+      - "043-backup-recovery.md"
+
+  # Backend tasks
+  - patterns:
+      - "flask|api endpoint|rest"
+      - "sqlalchemy|model|migration"
+      - "backend service|business logic"
+      - "authentication|jwt|oauth"
+      - "middleware|decorator"
+    target: backend
+    prompts:
+      - "003-flask-app-structure.md"
+      - "004-auth-system.md"
+      - "005-tenant-middleware.md"
+      - "014-data-source-api.md"
+      - "019-semantic-layer-api.md"
+      - "024-dashboard-api.md"
+      - "028-tenant-management-api.md"
+      - "029-user-management-api.md"
+
+  # Frontend tasks
+  - patterns:
+      - "react|component|tsx"
+      - "frontend|ui|ux"
+      - "form|page|layout"
+      - "state management|zustand|tanstack"
+      - "tailwind|shadcn"
+    target: frontend
+    prompts:
+      - "006-react-project.md"
+      - "007-auth-ui.md"
+      - "015-data-source-ui.md"
+      - "020-semantic-layer-ui.md"
+      - "025-dashboard-builder-ui.md"
+      - "026-chart-components.md"
+      - "027-query-interface-ui.md"
+      - "030-admin-dashboard-ui.md"
+
+  # Template Engine tasks (SECURITY CRITICAL)
+  - patterns:
+      - "template|jinja2|code generation"
+      - "pyspark template|dag template|dbt template"
+      - "generate.*code|render.*template"
+    target: template-engine
+    prompts:
+      - "008-template-engine-core.md"
+      - "009-sql-templates.md"
+      - "010-dbt-templates.md"
+      - "011-airflow-templates.md"
+      - "012-clickhouse-templates.md"
+    require_review: true
+
+  # Data Sources tasks
+  - patterns:
+      - "data source|connection|connector"
+      - "schema introspection|metadata"
+      - "database driver|jdbc|odbc"
+      - "connection test|connection pool"
+    target: data-sources
+    prompts:
+      - "013-data-source-connectors.md"
+      - "014-data-source-api.md"
+      - "015-data-source-ui.md"
+
+  # dbt tasks
+  - patterns:
+      - "dbt|transformation|semantic layer"
+      - "data model|lineage|mart"
+      - "staging|intermediate"
+    target: dbt
+    prompts:
+      - "017-dbt-project-setup.md"
+      - "018-dbt-model-generator.md"
+      - "019-semantic-layer-api.md"
+      - "020-semantic-layer-ui.md"
+      - "021-transformation-dag-generator.md"
+
+  # Orchestration tasks
+  - patterns:
+      - "airflow|dag|workflow"
+      - "scheduling|cron|pipeline"
+      - "task operator|sensor"
+      - "dag builder|dag monitor"
+    target: orchestration
+    prompts:
+      - "011-airflow-templates.md"
+      - "016-ingestion-dag-generator.md"
+      - "021-transformation-dag-generator.md"
+
+  # Dashboard tasks
+  - patterns:
+      - "dashboard|chart|visualization"
+      - "analytics|widget|metric"
+      - "sql editor|query interface"
+      - "echarts|recharts"
+    target: dashboard
+    prompts:
+      - "024-dashboard-api.md"
+      - "025-dashboard-builder-ui.md"
+      - "026-chart-components.md"
+      - "027-query-interface-ui.md"
+
+  # AI tasks
+  - patterns:
+      - "ai|llm|ollama"
+      - "natural language|nl2sql|nlq"
+      - "intent|classification|prompt"
+    target: ai
+    prompts:
+      - "022-ollama-integration.md"
+      - "023-nl-to-sql.md"
+
+  # Admin tasks
+  - patterns:
+      - "tenant management|user management"
+      - "rbac|role|permission"
+      - "admin portal|admin dashboard"
+      - "quota|billing|subscription"
+    target: admin
+    prompts:
+      - "028-tenant-management-api.md"
+      - "029-user-management-api.md"
+      - "030-admin-dashboard-ui.md"
+      - "031-rbac-implementation.md"
+
+  # Testing tasks
+  - patterns:
+      - "test|testing|coverage"
+      - "pytest|vitest|playwright"
+      - "unit test|integration test|e2e"
+      - "fixture|mock|stub"
+    target: testing
+    prompts:
+      - "034-unit-test-suite.md"
+      - "035-integration-test-suite.md"
+      - "036-e2e-test-suite.md"
+      - "044-performance-testing.md"
+
+  # Security tasks
+  - patterns:
+      - "security|encryption|audit"
+      - "credential|secret|vault"
+      - "penetration|vulnerability"
+      - "authentication hardening"
+    target: security
+    prompts:
+      - "032-audit-logging.md"
+      - "033-data-encryption.md"
+      - "045-security-testing.md"
+    require_review: true
+
+# ============================================
+# PHASE MAPPINGS
+# ============================================
+phases:
+  phase_1:
+    name: "Foundation & Infrastructure"
+    duration: "Week 1-2"
+    agents:
+      - infrastructure
+      - backend
+      - frontend
+    prompts:
+      - "001-init-infrastructure.md"
+      - "002-database-setup.md"
+      - "003-flask-app-structure.md"
+      - "004-auth-system.md"
+      - "005-tenant-middleware.md"
+      - "006-react-project.md"
+      - "007-auth-ui.md"
+
+  phase_2:
+    name: "Template Engine"
+    duration: "Week 3"
+    agents:
+      - template-engine
+      - backend
+      - security
+    prompts:
+      - "008-template-engine-core.md"
+      - "009-sql-templates.md"
+      - "010-dbt-templates.md"
+      - "011-airflow-templates.md"
+      - "012-clickhouse-templates.md"
+
+  phase_3:
+    name: "Data Sources"
+    duration: "Week 4-5"
+    agents:
+      - data-sources
+      - backend
+      - frontend
+    prompts:
+      - "013-data-source-connectors.md"
+      - "014-data-source-api.md"
+      - "015-data-source-ui.md"
+      - "016-ingestion-dag-generator.md"
+
+  phase_4:
+    name: "Semantic Layer"
+    duration: "Week 6-7"
+    agents:
+      - dbt
+      - backend
+      - frontend
+      - orchestration
+    prompts:
+      - "017-dbt-project-setup.md"
+      - "018-dbt-model-generator.md"
+      - "019-semantic-layer-api.md"
+      - "020-semantic-layer-ui.md"
+      - "021-transformation-dag-generator.md"
+
+  phase_5:
+    name: "Analytics & AI"
+    duration: "Week 8-9"
+    agents:
+      - dashboard
+      - ai
+      - frontend
+    prompts:
+      - "022-ollama-integration.md"
+      - "023-nl-to-sql.md"
+      - "024-dashboard-api.md"
+      - "025-dashboard-builder-ui.md"
+      - "026-chart-components.md"
+      - "027-query-interface-ui.md"
+
+  phase_6:
+    name: "Governance"
+    duration: "Week 10"
+    agents:
+      - admin
+      - security
+      - backend
+    prompts:
+      - "028-tenant-management-api.md"
+      - "029-user-management-api.md"
+      - "030-admin-dashboard-ui.md"
+      - "031-rbac-implementation.md"
+      - "032-audit-logging.md"
+      - "033-data-encryption.md"
+
+  phase_7:
+    name: "Testing"
+    duration: "Week 11"
+    agents:
+      - testing
+      - security
+    prompts:
+      - "034-unit-test-suite.md"
+      - "035-integration-test-suite.md"
+      - "036-e2e-test-suite.md"
+      - "044-performance-testing.md"
+      - "045-security-testing.md"
+
+  phase_8:
+    name: "Deployment"
+    duration: "Week 12"
+    agents:
+      - infrastructure
+      - security
+    prompts:
+      - "037-cicd-pipeline.md"
+      - "038-kubernetes-manifests.md"
+      - "039-helm-charts.md"
+      - "040-monitoring-setup.md"
+      - "041-logging-infrastructure.md"
+      - "042-alerting-configuration.md"
+      - "043-backup-recovery.md"
+      - "049-deployment-runbook.md"
+      - "050-launch-checklist.md"
+
+# ============================================
+# ESCALATION RULES
+# ============================================
+escalation:
+  # Always require human review for these
+  require_review:
+    - security_changes
+    - schema_migrations
+    - template_modifications
+    - third_party_additions
+    - architecture_changes
+
+  # Notify on these events
+  notify_on:
+    - phase_completion
+    - test_failures
+    - security_warnings
+    - integration_errors
+
+# ============================================
+# CONTEXT SHARING
+# ============================================
+context:
+  # Files all agents should be aware of
+  shared_files:
+    - "docs/requirements/BRD.md"
+    - "docs/requirements/Architecture_Decisions.md"
+    - "docs/implementation/IMPLEMENTATION_PLAN.md"
+    - ".github/prompts/README.md"
+
+  # Critical constraints all agents must follow
+  constraints:
+    - name: "Template Engine Rule"
+      description: "NO arbitrary code generation. All executable artifacts must use pre-approved templates."
+      applies_to: [template-engine, orchestration, dbt, data-sources]
+    
+    - name: "Multi-Tenant Isolation"
+      description: "All data access must be scoped to tenant context"
+      applies_to: [backend, data-sources, dashboard, admin]
+    
+    - name: "Credential Encryption"
+      description: "All credentials must be encrypted using AES-256 via Fernet"
+      applies_to: [backend, data-sources, security]
+
+# ============================================
+# DELEGATION PROTOCOL
+# ============================================
+delegation:
+  format: |
+    [DELEGATE: @{agent_id}]
+    Task: {task_description}
+    Context: {relevant_context}
+    Expected Output: {expected_output}
+    Prompt Reference: {prompt_file}
+    [/DELEGATE]
+  
+  response_format: |
+    ✅ Task Complete: {task_description}
+    📁 Files modified:
+      {file_list}
+    🧪 Tests: {test_status}
+    📊 Progress: {progress}
+    
+    Next: {next_task}
