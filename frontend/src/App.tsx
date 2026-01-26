@@ -4,7 +4,10 @@ import { AuthProvider } from '@/contexts/AuthContext'
 import { ThemeProvider } from '@/contexts/ThemeContext'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { MainLayout } from '@/components/layout/MainLayout'
-import { LoginPage } from '@/pages/auth/LoginPage'
+import { LoginPage } from '@/features/auth/pages/LoginPage'
+import { RegisterPage } from '@/features/auth/pages/RegisterPage'
+import { ForgotPasswordPage } from '@/features/auth/pages/ForgotPasswordPage'
+import { ResetPasswordPage } from '@/features/auth/pages/ResetPasswordPage'
 import { DashboardPage } from '@/pages/dashboard/DashboardPage'
 import { DagsListPage } from '@/pages/orchestration/DagsListPage'
 import { DagBuilderPage } from '@/pages/orchestration/DagBuilderPage'
@@ -16,8 +19,11 @@ function App() {
     <ThemeProvider defaultTheme="light" storageKey="novasight-theme">
       <AuthProvider>
         <Routes>
-          {/* Public routes */}
+          {/* Public routes - Authentication */}
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
 
           {/* Protected routes */}
           <Route

@@ -8,6 +8,13 @@ export interface LoginCredentials {
   tenant_slug?: string
 }
 
+export interface RegisterCredentials {
+  email: string
+  password: string
+  name: string
+  tenant_name?: string
+}
+
 export interface User {
   id: string
   email: string
@@ -18,6 +25,14 @@ export interface User {
 }
 
 export interface LoginResponse {
+  access_token: string
+  refresh_token: string
+  token_type: string
+  expires_in: number
+  user: User
+}
+
+export interface RegisterResponse {
   access_token: string
   refresh_token: string
   token_type: string
@@ -37,6 +52,14 @@ class AuthService {
     return response.data
   }
 
+  async register(credentials: RegisterCredentials): Promise<RegisterResponse> {
+    const response = await axios.post<RegisterResponse>(
+      `${API_BASE_URL}/api/v1/auth/register`,
+      credentials
+    )
+    return response.data
+  }
+
   async getCurrentUser(): Promise<User> {
     const response = await axios.get<{ user: User }>(
       `${API_BASE_URL}/api/v1/auth/me`,
@@ -47,6 +70,20 @@ class AuthService {
       }
     )
     return response.data.user
+  }
+
+  async forgotPassword(email: string): Promise<void> {
+    await axios.post(
+      `${API_BASE_URL}/api/v1/auth/forgot-password`,
+      { email }
+    )
+  }
+
+  async resetPassword(token: string, password: string): Promise<void> {
+    await axios.post(
+      `${API_BASE_URL}/api/v1/auth/reset-password`,
+      { token, password }
+    )
   }
 
   async refreshAccessToken(): Promise<string> {

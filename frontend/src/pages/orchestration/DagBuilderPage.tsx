@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import ReactFlow, {
   Node,
-  Edge,
   Controls,
   Background,
   MiniMap,
@@ -157,6 +156,9 @@ export function DagBuilderPage() {
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back
             </Button>
+            <span className="text-sm text-muted-foreground">
+              {isEditing ? 'Edit DAG' : 'Create New DAG'}
+            </span>
             <div className="flex items-center gap-2">
               <Input
                 placeholder="DAG Name"

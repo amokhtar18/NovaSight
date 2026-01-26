@@ -15,7 +15,7 @@ import logging
 import os
 
 from app.config import get_config
-from app.extensions import db, migrate, jwt, redis_client
+from app.extensions import db, migrate, jwt, redis_client, limiter
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,9 @@ def create_app(config_name: str = None) -> Flask:
     # Register error handlers
     _register_error_handlers(app)
     
+    # Register middleware
+    _register_middleware(app)
+    
     # Configure logging
     _configure_logging(app)
     
@@ -66,6 +69,15 @@ def _init_extensions(app: Flask) -> None:
     # Initialize Redis if configured
     if app.config.get("REDIS_URL"):
         redis_client.init_app(app)
+        # Use Redis for rate limiting in production
+        limiter._storage_uri = app.config.get("REDIS_URL")
+    
+    # Initialize rate limiter
+    limiter.init_app(app)
+    
+    # Register JWT handlers (callbacks for token blacklist, etc.)
+    from app.middleware.jwt_handlers import register_jwt_handlers
+    register_jwt_handlers(jwt)
 
 
 def _register_blueprints(app: Flask) -> None:
@@ -90,3 +102,11 @@ def _configure_logging(app: Flask) -> None:
         level=getattr(logging, log_level),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
+
+
+def _register_middleware(app: Flask) -> None:
+    """Register request/response middleware."""
+    from app.middleware import TenantContextMiddleware
+    
+    # Initialize tenant context middleware
+    TenantContextMiddleware(app)

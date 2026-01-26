@@ -8,6 +8,8 @@ Centralized extension instances for Flask application.
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from redis import Redis
 from typing import Optional
 
@@ -49,3 +51,10 @@ jwt = JWTManager()
 
 # Redis client instance
 redis_client = RedisClient()
+
+# Rate limiter instance (uses Redis in production, in-memory for development)
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",  # Will be updated to Redis in init_app
+)

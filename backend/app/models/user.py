@@ -133,6 +133,9 @@ class User(db.Model):
     sso_provider = db.Column(String(50), nullable=True)
     sso_subject = db.Column(String(255), nullable=True)
     
+    # Email verification
+    email_verified = db.Column(Boolean, default=False, nullable=False)
+    
     # Preferences and settings
     preferences = db.Column(JSONB, default=dict, nullable=False)
     
@@ -154,12 +157,14 @@ class User(db.Model):
         return f"<User {self.email}>"
     
     def set_password(self, password: str) -> None:
-        """Hash and set user password."""
-        self.password_hash = generate_password_hash(password)
+        """Hash and set user password using Argon2."""
+        from app.services.password_service import password_service
+        self.password_hash = password_service.hash(password)
     
     def check_password(self, password: str) -> bool:
-        """Verify password against stored hash."""
-        return check_password_hash(self.password_hash, password)
+        """Verify password against stored hash using Argon2."""
+        from app.services.password_service import password_service
+        return password_service.verify(password, self.password_hash)
     
     def has_role(self, role_name: str) -> bool:
         """Check if user has a specific role."""

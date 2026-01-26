@@ -100,6 +100,31 @@ class DataConnection(db.Model):
     def __repr__(self):
         return f"<DataConnection {self.name}>"
     
+    @classmethod
+    def for_tenant(cls, tenant_id: Optional[str] = None):
+        """
+        Query filtered by tenant.
+        
+        Args:
+            tenant_id: Optional explicit tenant ID. Uses g.tenant_id if not provided.
+        
+        Returns:
+            Query filtered by tenant_id
+        """
+        from flask import g, has_request_context
+        
+        if tenant_id is None:
+            if has_request_context():
+                if hasattr(g, 'tenant') and g.tenant:
+                    tenant_id = str(g.tenant.id)
+                elif hasattr(g, 'tenant_id'):
+                    tenant_id = g.tenant_id
+        
+        if not tenant_id:
+            raise ValueError("Tenant context required for this query")
+        
+        return cls.query.filter(cls.tenant_id == tenant_id)
+    
     def to_dict(self, mask_password: bool = True) -> dict:
         """Convert connection to dictionary."""
         result = {
