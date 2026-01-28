@@ -47,4 +47,4 @@ python3 .github/scripts/validate_handoff.py
 ## Requirements
 
 - Python 3.6+
-- PyYAML (`pip install pyyaml`)
+- PyYAML (`pip install PyYAML`)

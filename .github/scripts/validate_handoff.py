@@ -15,8 +15,24 @@ def load_handoff_config():
         print(f"❌ Config file not found: {config_path}")
         sys.exit(1)
     
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        print(f"❌ Error parsing YAML: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Error reading file: {e}")
+        sys.exit(1)
+    
+    # Validate required top-level keys
+    required_keys = ['agents', 'priority_order', 'handoff_rules', 'phases', 'context', 'metadata']
+    missing_keys = [key for key in required_keys if key not in config]
+    if missing_keys:
+        print(f"❌ Missing required configuration keys: {', '.join(missing_keys)}")
+        sys.exit(1)
+    
+    return config
 
 def check_agent_files(config):
     """Verify all agent file references exist."""
