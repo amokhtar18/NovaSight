@@ -1,0 +1,90 @@
+"""
+Auto-generated Airflow Pipeline DAG: {{ dag_name }}
+Generated for tenant: {{ tenant_id }}
+Generated at: {{ generated_at }}
+
+This DAG runs multiple pre-defined PySpark jobs created via the PySpark App Builder.
+All PySpark code was generated from approved templates (ADR-002 compliant).
+"""
+from datetime import datetime, timedelta
+from airflow import DAG
+from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
+from airflow.operators.python import PythonOperator
+from airflow.utils.dates import days_ago
+
+default_args = {
+    'owner': 'novasight',
+    'depends_on_past': False,
+    'start_date': days_ago(1),
+    'email_on_failure': {{ 'True' if notifications.get('email_on_failure') else 'False' }},
+    'email_on_retry': False,
+    'retries': {{ retries | default(2) }},
+    'retry_delay': timedelta(minutes={{ retry_delay_minutes | default(5) }}),
+    {% if notifications.get('email') %}
+    'email': ['{{ notifications.email }}'],
+    {% endif %}
+}
+
+with DAG(
+    dag_id='{{ dag_id }}',
+    default_args=default_args,
+    description='Pipeline: {{ dag_name }}{% if description %} - {{ description }}{% endif %}',
+    schedule_interval='{{ schedule }}',
+    catchup=False,
+    max_active_runs=1,
+    tags=['pipeline', 'pyspark', 'tenant_{{ tenant_id }}'],
+) as dag:
+    
+    tasks = []
+    
+    {% for app in apps %}
+    {{ app.task_id }} = SparkSubmitOperator(
+        task_id='{{ app.task_id }}',
+        application='{{ app.spark_app_path }}',
+        name='{{ app.app_name }}',
+        conn_id='spark_default',
+        conf={
+            {% for key, value in spark_conf.items() %}
+            '{{ key }}': '{{ value }}',
+            {% endfor %}
+        },
+        jars='/opt/spark/jars/postgresql-42.6.0.jar,/opt/spark/jars/mysql-connector-j-8.2.0.jar,/opt/spark/jars/clickhouse-jdbc-0.4.6-all.jar',
+        driver_memory='1g',
+        executor_memory='{{ spark_conf.get("spark.executor.memory", "2g") }}',
+        executor_cores={{ spark_conf.get("spark.executor.cores", "2") }},
+        verbose=True,
+    )
+    tasks.append({{ app.task_id }})
+    
+    {% endfor %}
+    
+    def log_pipeline_completion(**context):
+        """Log completion of pipeline."""
+        print(f"Pipeline '{{ dag_name }}' completed")
+        print(f"Executed {{ apps | length }} PySpark jobs:")
+        {% for app in apps %}
+        print(f"  - {{ app.app_name }}")
+        {% endfor %}
+    
+    log_task = PythonOperator(
+        task_id='log_pipeline_completion',
+        python_callable=log_pipeline_completion,
+        provide_context=True,
+    )
+    
+    # Task dependencies
+    {% if parallel %}
+    # Parallel execution - all tasks run simultaneously, then log
+    for task in tasks:
+        task >> log_task
+    {% else %}
+    # Sequential execution - tasks run in order
+    {% for i in range(apps | length) %}
+    {% if i > 0 %}
+    {{ apps[i-1].task_id }} >> {{ apps[i].task_id }}
+    {% endif %}
+    {% endfor %}
+    {% if apps %}
+    {{ apps[-1].task_id }} >> log_task
+    {% endif %}
+    {% endif %}

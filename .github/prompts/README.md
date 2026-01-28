@@ -1,7 +1,7 @@
 # NovaSight Implementation Prompts
 
 Prompts are organized in execution order following the 6-phase implementation plan.
-All 50 prompts have been created and are ready for execution.
+All 51 prompts have been created and are ready for execution.
 
 ## 📋 Prompt Execution Order
 
@@ -84,6 +84,7 @@ All 50 prompts have been created and are ready for execution.
 | 048 | [048-developer-documentation.md](048-developer-documentation.md) | @backend | opus 4.5 | Developer docs |
 | 049 | [049-deployment-runbook.md](049-deployment-runbook.md) | @infrastructure | sonnet 4.5 | Deployment runbook |
 | 050 | [050-launch-checklist.md](050-launch-checklist.md) | @security | opus 4.5 | Production launch checklist |
+| 051 | [051-ui-redesign.md](051-ui-redesign.md) | @frontend | sonnet 4.5 | UI redesign & polish |
 
 ## 🚀 Usage
 
@@ -106,7 +107,7 @@ Prompt: 001-init-infrastructure.md
 | Model | Count | Use Cases |
 |-------|-------|-----------|
 | opus 4.5 | 18 | Security, AI, templates, complex backend, documentation |
-| sonnet 4.5 | 30 | Frontend, infrastructure, testing, data processing |
+| sonnet 4.5 | 31 | Frontend, infrastructure, testing, data processing, UI redesign |
 | haiku 4.5 | 2 | Admin CRUD operations |
 
 ## 🎯 Agent Distribution
@@ -114,7 +115,7 @@ Prompt: 001-init-infrastructure.md
 | Agent | Prompts | Focus Area |
 |-------|---------|------------|
 | @infrastructure | 9 | DevOps, K8s, CI/CD, Monitoring |
-| @frontend | 8 | React UI components |
+| @frontend | 9 | React UI components, UI redesign |
 | @backend | 5 | Flask API services |
 | @template-engine | 5 | Jinja2 templates (ADR-002) |
 | @security | 6 | Auth, RBAC, Audit, Encryption |
@@ -137,12 +138,12 @@ Prompt: 001-init-infrastructure.md
 
 ## 🎉 Implementation Complete!
 
-All 50 implementation prompts have been created covering:
+All 51 implementation prompts have been created covering:
 - ✅ **Phase 1**: Foundation infrastructure (7 prompts)
 - ✅ **Phase 2**: Template engine & data sources (9 prompts)
 - ✅ **Phase 3**: Semantic layer & AI (7 prompts)
 - ✅ **Phase 4**: Analytics & dashboards (4 prompts)
 - ✅ **Phase 5**: Administration & security (6 prompts)
-- ✅ **Phase 6**: Testing, DevOps & documentation (17 prompts)
+- ✅ **Phase 6**: Testing, DevOps, documentation & UI polish (18 prompts)
 
 Execute prompts in numerical order using the orchestrator agent for optimal results.

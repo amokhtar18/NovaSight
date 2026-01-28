@@ -1,0 +1,61 @@
+{#
+NovaSight Analytics Query Template
+===================================
+
+Generates aggregation queries with grouping, filtering, and ordering.
+All inputs are validated before rendering (ADR-002 compliant).
+
+Parameters:
+- database: Target database name (e.g., tenant_123)
+- table: Target table name (e.g., events)
+- dimensions: List of {expression, alias}
+- measures: List of {aggregation, expression, alias}
+- filters: List of {column, operator, value}
+- group_by: List of column names
+- order_by: List of {column, direction}
+- limit: Maximum rows to return
+#}
+SELECT
+{% for dim in dimensions %}
+    {{ dim.expression }} AS {{ dim.alias | sql_safe }}{% if not loop.last or measures %},{% endif %}
+
+{% endfor %}
+{% for measure in measures %}
+    {{ measure.aggregation }}({{ measure.expression }}) AS {{ measure.alias | sql_safe }}{% if not loop.last %},{% endif %}
+
+{% endfor %}
+FROM {{ database }}.{{ table | default('events') }}
+{% if filters %}
+WHERE 1=1
+{% for filter in filters %}
+{% if filter.operator == 'IN' %}
+    AND {{ filter.column | sql_safe }} IN ({% for val in filter.value %}{{ val | sql_escape }}{% if not loop.last %}, {% endif %}{% endfor %})
+{% elif filter.operator == 'NOT IN' %}
+    AND {{ filter.column | sql_safe }} NOT IN ({% for val in filter.value %}{{ val | sql_escape }}{% if not loop.last %}, {% endif %}{% endfor %})
+{% elif filter.operator == 'BETWEEN' %}
+    AND {{ filter.column | sql_safe }} BETWEEN {{ filter.value.start | sql_escape }} AND {{ filter.value.end | sql_escape }}
+{% elif filter.operator == 'IS NULL' %}
+    AND {{ filter.column | sql_safe }} IS NULL
+{% elif filter.operator == 'IS NOT NULL' %}
+    AND {{ filter.column | sql_safe }} IS NOT NULL
+{% elif filter.operator == 'LIKE' or filter.operator == 'ILIKE' %}
+    AND {{ filter.column | sql_safe }} {{ filter.operator }} {{ filter.value | sql_escape }}
+{% else %}
+    AND {{ filter.column | sql_safe }} {{ filter.operator }} {{ filter.value | sql_escape }}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if group_by and group_by | length > 0 %}
+GROUP BY {% for col in group_by %}{{ col | sql_safe }}{% if not loop.last %}, {% endif %}{% endfor %}
+
+{% endif %}
+{% if order_by and order_by | length > 0 %}
+ORDER BY 
+{% for ob in order_by %}
+    {{ ob.column | sql_safe }} {{ ob.direction | upper }}{% if not loop.last %},{% endif %}
+
+{% endfor %}
+{% endif %}
+{% if limit %}
+LIMIT {{ limit | int }}
+{% endif %}

@@ -55,6 +55,10 @@ class BaseConfig:
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
     
+    # dbt Configuration
+    DBT_PROJECT_PATH = os.getenv("DBT_PROJECT_PATH", "./dbt")
+    DBT_TARGET = os.getenv("DBT_TARGET", "dev")
+    
     # CORS
     CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
     

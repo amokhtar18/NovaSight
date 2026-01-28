@@ -446,3 +446,282 @@ def get_task_logs(dag_id: str, run_id: str, task_id: str):
         raise NotFoundError("Task logs not found")
     
     return jsonify(result)
+
+
+# ============================================================================
+# PySpark DAG Generator Endpoints (Prompt 016)
+# ============================================================================
+# These endpoints generate Airflow DAGs to orchestrate pre-defined PySpark jobs
+# created via the PySpark App Builder. All PySpark code comes from pre-approved
+# templates (ADR-002 compliant).
+
+from app.services.dag_generator import PySparkDAGGenerator
+
+
+def _get_pyspark_dag_generator(tenant_id: str) -> PySparkDAGGenerator:
+    """Create PySparkDAGGenerator instance for tenant."""
+    return PySparkDAGGenerator(tenant_id)
+
+
+@api_v1_bp.route("/dags/pyspark/generate", methods=["POST"])
+@jwt_required()
+@require_tenant_context
+@require_roles(["data_engineer", "tenant_admin"])
+def generate_pyspark_dag():
+    """
+    Generate a DAG for a PySpark app.
+    
+    Creates an Airflow DAG that schedules and runs a pre-defined PySpark
+    application created via the PySpark App Builder.
+    
+    Request Body:
+        - pyspark_app_id: UUID of the PySpark app (required)
+        - schedule: Cron expression or preset (@hourly, @daily, etc.)
+        - spark_config: Optional Spark configuration overrides
+        - notifications: Optional notification settings
+            - email: Email address for notifications
+            - email_on_failure: Send email on failure
+        - retries: Number of retries on failure (default: 2)
+        - retry_delay_minutes: Minutes between retries (default: 5)
+    
+    Returns:
+        - dag_id: Generated DAG identifier
+        - message: Success message
+    
+    Example:
+        {
+            "pyspark_app_id": "550e8400-e29b-41d4-a716-446655440000",
+            "schedule": "@hourly",
+            "spark_config": {
+                "spark.executor.memory": "4g",
+                "spark.executor.cores": "4"
+            },
+            "notifications": {
+                "email": "alerts@example.com",
+                "email_on_failure": true
+            }
+        }
+    """
+    identity = get_jwt_identity()
+    tenant_id = identity.get("tenant_id")
+    
+    data = request.get_json()
+    if not data:
+        raise ValidationError("Request body required")
+    
+    pyspark_app_id = data.get("pyspark_app_id")
+    if not pyspark_app_id:
+        raise ValidationError("pyspark_app_id is required")
+    
+    generator = _get_pyspark_dag_generator(tenant_id)
+    
+    dag_id = generator.generate_dag_for_pyspark_app(
+        pyspark_app_id=pyspark_app_id,
+        schedule=data.get("schedule", "@hourly"),
+        spark_config=data.get("spark_config"),
+        notifications=data.get("notifications"),
+        retries=data.get("retries", 2),
+        retry_delay_minutes=data.get("retry_delay_minutes", 5),
+    )
+    
+    logger.info(f"Generated PySpark DAG '{dag_id}' for tenant {tenant_id}")
+    
+    return jsonify({
+        "dag_id": dag_id,
+        "message": "DAG generated successfully",
+    }), 201
+
+
+@api_v1_bp.route("/dags/pyspark/generate-pipeline", methods=["POST"])
+@jwt_required()
+@require_tenant_context
+@require_roles(["data_engineer", "tenant_admin"])
+def generate_pyspark_pipeline_dag():
+    """
+    Generate a DAG that runs multiple PySpark apps.
+    
+    Creates a single Airflow DAG that orchestrates multiple pre-defined
+    PySpark applications, either in parallel or sequential order.
+    
+    Request Body:
+        - pyspark_app_ids: List of PySpark app UUIDs to run (required)
+        - dag_name: Name for the combined DAG (required)
+        - schedule: Cron expression or preset (@daily, @hourly, etc.)
+        - parallel: If true, run apps in parallel; if false, sequential
+        - spark_config: Optional Spark configuration overrides
+        - notifications: Optional notification settings
+        - description: Optional pipeline description
+        - retries: Number of retries on failure (default: 2)
+        - retry_delay_minutes: Minutes between retries (default: 5)
+    
+    Returns:
+        - dag_id: Generated DAG identifier
+        - message: Success message
+    
+    Example:
+        {
+            "pyspark_app_ids": [
+                "550e8400-e29b-41d4-a716-446655440000",
+                "550e8400-e29b-41d4-a716-446655440001"
+            ],
+            "dag_name": "daily_data_pipeline",
+            "schedule": "@daily",
+            "parallel": false,
+            "description": "Daily data ingestion pipeline"
+        }
+    """
+    identity = get_jwt_identity()
+    tenant_id = identity.get("tenant_id")
+    
+    data = request.get_json()
+    if not data:
+        raise ValidationError("Request body required")
+    
+    pyspark_app_ids = data.get("pyspark_app_ids")
+    dag_name = data.get("dag_name")
+    
+    if not pyspark_app_ids or not isinstance(pyspark_app_ids, list):
+        raise ValidationError("pyspark_app_ids must be a list of UUIDs")
+    if not dag_name:
+        raise ValidationError("dag_name is required")
+    if len(dag_name) > 64:
+        raise ValidationError("dag_name must be 64 characters or less")
+    
+    generator = _get_pyspark_dag_generator(tenant_id)
+    
+    dag_id = generator.generate_dag_for_multiple_apps(
+        pyspark_app_ids=pyspark_app_ids,
+        dag_name=dag_name,
+        schedule=data.get("schedule", "@daily"),
+        parallel=data.get("parallel", False),
+        spark_config=data.get("spark_config"),
+        notifications=data.get("notifications"),
+        description=data.get("description"),
+        retries=data.get("retries", 2),
+        retry_delay_minutes=data.get("retry_delay_minutes", 5),
+    )
+    
+    logger.info(f"Generated pipeline DAG '{dag_id}' for tenant {tenant_id}")
+    
+    return jsonify({
+        "dag_id": dag_id,
+        "message": "Pipeline DAG generated successfully",
+    }), 201
+
+
+@api_v1_bp.route("/dags/pyspark", methods=["GET"])
+@jwt_required()
+@require_tenant_context
+def list_pyspark_dags():
+    """
+    List all PySpark DAGs for the current tenant.
+    
+    Returns a list of all Airflow DAGs generated for PySpark apps
+    belonging to the current tenant.
+    
+    Returns:
+        - dags: List of DAG metadata
+            - dag_id: DAG identifier
+            - file_path: Path to DAG file
+            - is_pipeline: True if this is a multi-app pipeline DAG
+            - created_at: Creation timestamp
+    """
+    identity = get_jwt_identity()
+    tenant_id = identity.get("tenant_id")
+    
+    generator = _get_pyspark_dag_generator(tenant_id)
+    dags = generator.list_dags_for_tenant()
+    
+    return jsonify({"dags": dags})
+
+
+@api_v1_bp.route("/dags/pyspark/<dag_id>", methods=["GET"])
+@jwt_required()
+@require_tenant_context
+def get_pyspark_dag(dag_id: str):
+    """
+    Get detailed information about a PySpark DAG.
+    
+    Args:
+        dag_id: DAG identifier
+    
+    Returns:
+        DAG information including schedule and job count
+    """
+    identity = get_jwt_identity()
+    tenant_id = identity.get("tenant_id")
+    
+    generator = _get_pyspark_dag_generator(tenant_id)
+    dag_info = generator.get_dag_info(dag_id)
+    
+    if not dag_info:
+        raise NotFoundError(f"DAG {dag_id} not found")
+    
+    return jsonify({"dag": dag_info})
+
+
+@api_v1_bp.route("/dags/pyspark/<dag_id>", methods=["DELETE"])
+@jwt_required()
+@require_tenant_context
+@require_roles(["data_engineer", "tenant_admin"])
+def delete_pyspark_dag(dag_id: str):
+    """
+    Delete a PySpark DAG and its associated job files.
+    
+    Args:
+        dag_id: DAG identifier
+    
+    Returns:
+        Success message
+    """
+    identity = get_jwt_identity()
+    tenant_id = identity.get("tenant_id")
+    
+    generator = _get_pyspark_dag_generator(tenant_id)
+    generator.delete_dag(dag_id)
+    
+    logger.info(f"Deleted PySpark DAG '{dag_id}' from tenant {tenant_id}")
+    
+    return jsonify({"message": f"DAG {dag_id} deleted successfully"})
+
+
+@api_v1_bp.route("/dags/pyspark/<dag_id>/schedule", methods=["PATCH"])
+@jwt_required()
+@require_tenant_context
+@require_roles(["data_engineer", "tenant_admin"])
+def update_pyspark_dag_schedule(dag_id: str):
+    """
+    Update the schedule of a PySpark DAG.
+    
+    Args:
+        dag_id: DAG identifier
+    
+    Request Body:
+        - schedule: New schedule expression (cron or preset)
+    
+    Returns:
+        Success message
+    
+    Example:
+        {
+            "schedule": "@daily"
+        }
+    """
+    identity = get_jwt_identity()
+    tenant_id = identity.get("tenant_id")
+    
+    data = request.get_json()
+    if not data:
+        raise ValidationError("Request body required")
+    
+    new_schedule = data.get("schedule")
+    if not new_schedule:
+        raise ValidationError("schedule is required")
+    
+    generator = _get_pyspark_dag_generator(tenant_id)
+    generator.update_dag_schedule(dag_id, new_schedule)
+    
+    logger.info(f"Updated schedule for DAG '{dag_id}' to '{new_schedule}'")
+    
+    return jsonify({"message": f"Schedule updated to {new_schedule}"})
+

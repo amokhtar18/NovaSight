@@ -9,6 +9,8 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  Sparkles,
+  Boxes,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useState } from 'react'
@@ -17,8 +19,9 @@ const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Connections', href: '/connections', icon: Database },
   { name: 'DAGs', href: '/dags', icon: GitBranch },
-  { name: 'Models', href: '/models', icon: Table2 },
-  { name: 'Analytics', href: '/analytics', icon: BarChart3 },
+  { name: 'PySpark Apps', href: '/pyspark', icon: Sparkles },
+  { name: 'Semantic Layer', href: '/semantic', icon: Boxes },
+  { name: 'Dashboards', href: '/dashboards', icon: BarChart3 },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 

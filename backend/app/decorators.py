@@ -5,6 +5,7 @@ NovaSight Decorators
 Custom decorators for authorization and request handling.
 """
 
+import asyncio
 from functools import wraps
 from flask import request, g
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
@@ -12,6 +13,25 @@ from app.errors import AuthorizationError, AuthenticationError
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def async_route(f):
+    """
+    Decorator to enable async/await in Flask routes.
+    
+    Wraps an async function to run in the event loop.
+    
+    Usage:
+        @app.route('/api/endpoint')
+        @async_route
+        async def my_endpoint():
+            result = await some_async_operation()
+            return result
+    """
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(f(*args, **kwargs))
+    return wrapper
 
 
 def require_roles(allowed_roles: list):

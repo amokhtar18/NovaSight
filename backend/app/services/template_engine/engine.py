@@ -96,12 +96,19 @@ class TemplateEngine:
         'sql/create_table.sql.j2',
         'sql/create_index.sql.j2',
         'sql/tenant_schema.sql.j2',
+        'sql/analytics_query.sql.j2',
+        'sql/comparison_query.sql.j2',
+        'sql/trend_query.sql.j2',
+        'sql/top_n_query.sql.j2',
         'dbt/model.sql.j2',
         'dbt/schema.yml.j2',
         'dbt/sources.yml.j2',
         'airflow/dag.py.j2',
         'clickhouse/create_table.sql.j2',
         'clickhouse/materialized_view.sql.j2',
+        'pyspark/extract_job.py.j2',
+        'pyspark/scd_type1.py.j2',
+        'pyspark/scd_type2.py.j2',
     }
     
     def __init__(
@@ -162,6 +169,7 @@ class TemplateEngine:
         self.env.filters['pascal_case'] = to_pascal_case
         self.env.filters['sql_safe'] = sql_identifier_safe
         self.env.filters['sql_escape'] = sql_string_escape
+        self.env.filters['sql_value'] = sql_string_escape  # Alias for templates
         self.env.filters['sql_type'] = sql_type_mapping
         self.env.filters['quote_id'] = quote_identifier
         self.env.filters['indent_lines'] = indent_lines

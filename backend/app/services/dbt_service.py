@@ -1,0 +1,520 @@
+"""
+dbt Service for NovaSight.
+
+Provides dbt command execution with multi-tenant context support.
+"""
+
+import subprocess
+import os
+import json
+import logging
+from typing import Dict, Any, Optional, List
+from pathlib import Path
+from dataclasses import dataclass
+from enum import Enum
+
+from flask import current_app
+
+logger = logging.getLogger(__name__)
+
+
+class DbtCommand(str, Enum):
+    """Supported dbt commands."""
+    RUN = "run"
+    TEST = "test"
+    BUILD = "build"
+    COMPILE = "compile"
+    SEED = "seed"
+    SNAPSHOT = "snapshot"
+    DEPS = "deps"
+    DEBUG = "debug"
+    DOCS_GENERATE = "docs generate"
+    LS = "ls"
+    PARSE = "parse"
+
+
+@dataclass
+class DbtResult:
+    """Result of a dbt command execution."""
+    success: bool
+    command: str
+    stdout: str
+    stderr: str
+    return_code: int
+    run_results: Optional[Dict[str, Any]] = None
+    manifest: Optional[Dict[str, Any]] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "success": self.success,
+            "command": self.command,
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "return_code": self.return_code,
+            "run_results": self.run_results,
+            "manifest": self.manifest,
+        }
+
+
+class DbtService:
+    """Service for executing dbt commands with tenant context."""
+    
+    def __init__(self, dbt_project_path: Optional[str] = None):
+        """
+        Initialize the dbt service.
+        
+        Args:
+            dbt_project_path: Path to the dbt project directory.
+                            Defaults to configured path or ./dbt
+        """
+        if dbt_project_path:
+            self.project_path = Path(dbt_project_path)
+        else:
+            # Try to get from Flask config, fallback to default
+            try:
+                self.project_path = Path(current_app.config.get(
+                    'DBT_PROJECT_PATH',
+                    './dbt'
+                ))
+            except RuntimeError:
+                # Outside Flask context
+                self.project_path = Path('./dbt')
+        
+        self.profiles_dir = self.project_path
+    
+    def run(
+        self,
+        tenant_id: str,
+        select: Optional[str] = None,
+        exclude: Optional[str] = None,
+        full_refresh: bool = False,
+        vars: Optional[Dict[str, Any]] = None,
+        target: Optional[str] = None,
+    ) -> DbtResult:
+        """
+        Run dbt models.
+        
+        Args:
+            tenant_id: Tenant identifier for context
+            select: Model selection criteria (e.g., "staging.customers+")
+            exclude: Models to exclude
+            full_refresh: Force full refresh of incremental models
+            vars: Additional dbt variables
+            target: Target environment (dev, prod)
+            
+        Returns:
+            DbtResult with execution details
+        """
+        cmd = ['dbt', 'run']
+        
+        if select:
+            cmd.extend(['--select', select])
+        if exclude:
+            cmd.extend(['--exclude', exclude])
+        if full_refresh:
+            cmd.append('--full-refresh')
+        if vars:
+            cmd.extend(['--vars', json.dumps(vars)])
+        if target:
+            cmd.extend(['--target', target])
+        
+        return self._execute(cmd, tenant_id)
+    
+    def test(
+        self,
+        tenant_id: str,
+        select: Optional[str] = None,
+        exclude: Optional[str] = None,
+        store_failures: bool = False,
+    ) -> DbtResult:
+        """
+        Run dbt tests.
+        
+        Args:
+            tenant_id: Tenant identifier for context
+            select: Test selection criteria
+            exclude: Tests to exclude
+            store_failures: Store test failures in database
+            
+        Returns:
+            DbtResult with execution details
+        """
+        cmd = ['dbt', 'test']
+        
+        if select:
+            cmd.extend(['--select', select])
+        if exclude:
+            cmd.extend(['--exclude', exclude])
+        if store_failures:
+            cmd.append('--store-failures')
+        
+        return self._execute(cmd, tenant_id)
+    
+    def build(
+        self,
+        tenant_id: str,
+        select: Optional[str] = None,
+        exclude: Optional[str] = None,
+        full_refresh: bool = False,
+    ) -> DbtResult:
+        """
+        Run dbt build (run + test in DAG order).
+        
+        Args:
+            tenant_id: Tenant identifier for context
+            select: Selection criteria
+            exclude: Items to exclude
+            full_refresh: Force full refresh
+            
+        Returns:
+            DbtResult with execution details
+        """
+        cmd = ['dbt', 'build']
+        
+        if select:
+            cmd.extend(['--select', select])
+        if exclude:
+            cmd.extend(['--exclude', exclude])
+        if full_refresh:
+            cmd.append('--full-refresh')
+        
+        return self._execute(cmd, tenant_id)
+    
+    def compile(
+        self,
+        tenant_id: str,
+        select: Optional[str] = None,
+    ) -> DbtResult:
+        """
+        Compile dbt models without executing.
+        
+        Args:
+            tenant_id: Tenant identifier for context
+            select: Model selection criteria
+            
+        Returns:
+            DbtResult with compiled SQL
+        """
+        cmd = ['dbt', 'compile']
+        
+        if select:
+            cmd.extend(['--select', select])
+        
+        return self._execute(cmd, tenant_id)
+    
+    def seed(
+        self,
+        tenant_id: str,
+        select: Optional[str] = None,
+        full_refresh: bool = False,
+    ) -> DbtResult:
+        """
+        Load seed data.
+        
+        Args:
+            tenant_id: Tenant identifier for context
+            select: Seed selection criteria
+            full_refresh: Drop and recreate seeds
+            
+        Returns:
+            DbtResult with execution details
+        """
+        cmd = ['dbt', 'seed']
+        
+        if select:
+            cmd.extend(['--select', select])
+        if full_refresh:
+            cmd.append('--full-refresh')
+        
+        return self._execute(cmd, tenant_id)
+    
+    def snapshot(
+        self,
+        tenant_id: str,
+        select: Optional[str] = None,
+    ) -> DbtResult:
+        """
+        Run dbt snapshots (SCD Type 2).
+        
+        Args:
+            tenant_id: Tenant identifier for context
+            select: Snapshot selection criteria
+            
+        Returns:
+            DbtResult with execution details
+        """
+        cmd = ['dbt', 'snapshot']
+        
+        if select:
+            cmd.extend(['--select', select])
+        
+        return self._execute(cmd, tenant_id)
+    
+    def deps(self) -> DbtResult:
+        """
+        Install dbt packages.
+        
+        Returns:
+            DbtResult with execution details
+        """
+        cmd = ['dbt', 'deps']
+        return self._execute(cmd, tenant_id='system')
+    
+    def debug(self, tenant_id: str) -> DbtResult:
+        """
+        Test dbt connection and configuration.
+        
+        Args:
+            tenant_id: Tenant identifier for context
+            
+        Returns:
+            DbtResult with debug information
+        """
+        cmd = ['dbt', 'debug']
+        return self._execute(cmd, tenant_id)
+    
+    def docs_generate(self, tenant_id: str) -> DbtResult:
+        """
+        Generate dbt documentation.
+        
+        Args:
+            tenant_id: Tenant identifier for context
+            
+        Returns:
+            DbtResult with execution details
+        """
+        cmd = ['dbt', 'docs', 'generate']
+        return self._execute(cmd, tenant_id)
+    
+    def list_models(
+        self,
+        tenant_id: str,
+        select: Optional[str] = None,
+        resource_type: str = "model",
+    ) -> DbtResult:
+        """
+        List dbt resources.
+        
+        Args:
+            tenant_id: Tenant identifier for context
+            select: Selection criteria
+            resource_type: Type of resource (model, test, source, etc.)
+            
+        Returns:
+            DbtResult with list of resources
+        """
+        cmd = ['dbt', 'ls', '--resource-type', resource_type, '--output', 'json']
+        
+        if select:
+            cmd.extend(['--select', select])
+        
+        return self._execute(cmd, tenant_id)
+    
+    def parse(self, tenant_id: str) -> DbtResult:
+        """
+        Parse dbt project and build manifest.
+        
+        Args:
+            tenant_id: Tenant identifier for context
+            
+        Returns:
+            DbtResult with manifest
+        """
+        cmd = ['dbt', 'parse']
+        result = self._execute(cmd, tenant_id)
+        
+        # Try to load manifest if parse succeeded
+        if result.success:
+            manifest_path = self.project_path / 'target' / 'manifest.json'
+            if manifest_path.exists():
+                with open(manifest_path, 'r') as f:
+                    result.manifest = json.load(f)
+        
+        return result
+    
+    def get_lineage(self, tenant_id: str, model_name: str) -> Dict[str, Any]:
+        """
+        Get lineage information for a model.
+        
+        Args:
+            tenant_id: Tenant identifier for context
+            model_name: Name of the model
+            
+        Returns:
+            Dictionary with upstream and downstream dependencies
+        """
+        # First parse to get manifest
+        parse_result = self.parse(tenant_id)
+        
+        if not parse_result.success or not parse_result.manifest:
+            return {
+                "error": "Failed to parse project",
+                "details": parse_result.stderr
+            }
+        
+        manifest = parse_result.manifest
+        nodes = manifest.get('nodes', {})
+        
+        # Find the model
+        model_key = None
+        for key, node in nodes.items():
+            if node.get('name') == model_name and node.get('resource_type') == 'model':
+                model_key = key
+                break
+        
+        if not model_key:
+            return {"error": f"Model '{model_name}' not found"}
+        
+        model_node = nodes[model_key]
+        
+        # Get upstream dependencies
+        upstream = []
+        for dep in model_node.get('depends_on', {}).get('nodes', []):
+            if dep in nodes:
+                upstream.append({
+                    "name": nodes[dep].get('name'),
+                    "resource_type": nodes[dep].get('resource_type'),
+                    "unique_id": dep
+                })
+        
+        # Get downstream dependents
+        downstream = []
+        child_map = manifest.get('child_map', {})
+        for child_key in child_map.get(model_key, []):
+            if child_key in nodes:
+                downstream.append({
+                    "name": nodes[child_key].get('name'),
+                    "resource_type": nodes[child_key].get('resource_type'),
+                    "unique_id": child_key
+                })
+        
+        return {
+            "model": model_name,
+            "unique_id": model_key,
+            "upstream": upstream,
+            "downstream": downstream,
+            "columns": model_node.get('columns', {}),
+            "description": model_node.get('description', ''),
+        }
+    
+    def _build_env(self, tenant_id: str) -> Dict[str, str]:
+        """
+        Build environment variables for dbt execution.
+        
+        Args:
+            tenant_id: Tenant identifier
+            
+        Returns:
+            Environment dictionary
+        """
+        env = os.environ.copy()
+        
+        # Tenant context
+        env['TENANT_ID'] = tenant_id
+        env['TENANT_DATABASE'] = f'tenant_{tenant_id}'
+        
+        # ClickHouse connection (use existing env vars or defaults)
+        if 'CLICKHOUSE_HOST' not in env:
+            env['CLICKHOUSE_HOST'] = 'localhost'
+        if 'CLICKHOUSE_PORT' not in env:
+            env['CLICKHOUSE_PORT'] = '8123'
+        if 'CLICKHOUSE_USER' not in env:
+            env['CLICKHOUSE_USER'] = 'default'
+        if 'CLICKHOUSE_PASSWORD' not in env:
+            env['CLICKHOUSE_PASSWORD'] = ''
+        
+        # dbt target
+        if 'DBT_TARGET' not in env:
+            env['DBT_TARGET'] = 'dev'
+        
+        return env
+    
+    def _execute(self, cmd: List[str], tenant_id: str) -> DbtResult:
+        """
+        Execute dbt command with tenant context.
+        
+        Args:
+            cmd: Command and arguments
+            tenant_id: Tenant identifier
+            
+        Returns:
+            DbtResult with execution details
+        """
+        env = self._build_env(tenant_id)
+        full_cmd = ' '.join(cmd)
+        
+        logger.info(f"Executing dbt command: {full_cmd} for tenant: {tenant_id}")
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=self.project_path,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minute timeout
+            )
+            
+            dbt_result = DbtResult(
+                success=result.returncode == 0,
+                command=full_cmd,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                return_code=result.returncode,
+            )
+            
+            # Try to load run_results.json if it exists
+            run_results_path = self.project_path / 'target' / 'run_results.json'
+            if run_results_path.exists():
+                try:
+                    with open(run_results_path, 'r') as f:
+                        dbt_result.run_results = json.load(f)
+                except json.JSONDecodeError:
+                    pass
+            
+            if dbt_result.success:
+                logger.info(f"dbt command succeeded: {full_cmd}")
+            else:
+                logger.warning(f"dbt command failed: {full_cmd}\n{result.stderr}")
+            
+            return dbt_result
+            
+        except subprocess.TimeoutExpired:
+            logger.error(f"dbt command timed out: {full_cmd}")
+            return DbtResult(
+                success=False,
+                command=full_cmd,
+                stdout="",
+                stderr="Command timed out after 300 seconds",
+                return_code=-1,
+            )
+        except Exception as e:
+            logger.error(f"dbt command error: {full_cmd} - {str(e)}")
+            return DbtResult(
+                success=False,
+                command=full_cmd,
+                stdout="",
+                stderr=str(e),
+                return_code=-1,
+            )
+
+
+# Singleton instance
+_dbt_service: Optional[DbtService] = None
+
+
+def get_dbt_service(project_path: Optional[str] = None) -> DbtService:
+    """
+    Get or create the dbt service instance.
+    
+    Args:
+        project_path: Optional path to dbt project
+        
+    Returns:
+        DbtService instance
+    """
+    global _dbt_service
+    if _dbt_service is None or project_path:
+        _dbt_service = DbtService(project_path)
+    return _dbt_service

@@ -1,0 +1,48 @@
+{#
+NovaSight Top N Query Template
+===============================
+
+Generates queries to find top or bottom N values by a measure.
+Useful for ranking and finding outliers.
+
+Parameters:
+- database: Target database name
+- table: Target table name
+- dimension: {expression, alias} for ranking dimension
+- measures: List of {aggregation, expression, alias}
+- filters: Optional filters
+- order_by: {column, direction} for ranking
+- limit: Number of results to return
+#}
+SELECT
+    {{ dimension.expression }} AS {{ dimension.alias | sql_safe }},
+{% for measure in measures %}
+    {{ measure.aggregation }}({{ measure.expression }}) AS {{ measure.alias | sql_safe }}{% if not loop.last %},{% endif %}
+
+{% endfor %}
+FROM {{ database }}.{{ table | default('events') }}
+{% if filters %}
+WHERE 1=1
+{% for filter in filters %}
+{% if filter.operator == 'IN' %}
+    AND {{ filter.column | sql_safe }} IN ({% for val in filter.value %}{{ val | sql_escape }}{% if not loop.last %}, {% endif %}{% endfor %})
+{% elif filter.operator == 'NOT IN' %}
+    AND {{ filter.column | sql_safe }} NOT IN ({% for val in filter.value %}{{ val | sql_escape }}{% if not loop.last %}, {% endif %}{% endfor %})
+{% elif filter.operator == 'BETWEEN' %}
+    AND {{ filter.column | sql_safe }} BETWEEN {{ filter.value.start | sql_escape }} AND {{ filter.value.end | sql_escape }}
+{% elif filter.operator == 'IS NULL' %}
+    AND {{ filter.column | sql_safe }} IS NULL
+{% elif filter.operator == 'IS NOT NULL' %}
+    AND {{ filter.column | sql_safe }} IS NOT NULL
+{% else %}
+    AND {{ filter.column | sql_safe }} {{ filter.operator }} {{ filter.value | sql_escape }}
+{% endif %}
+{% endfor %}
+{% endif %}
+GROUP BY {{ dimension.alias | sql_safe }}
+{% if order_by %}
+ORDER BY {{ order_by.column | sql_safe }} {{ order_by.direction | upper }}
+{% else %}
+ORDER BY 1 DESC
+{% endif %}
+LIMIT {{ limit | default(10) | int }}

@@ -11,3 +11,4 @@
 export * from './api'
 export * from './models'
 export * from './datasource'
+export * from './pyspark'

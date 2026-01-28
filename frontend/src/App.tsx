@@ -14,6 +14,13 @@ import { DagBuilderPage } from '@/pages/orchestration/DagBuilderPage'
 import { DagMonitorPage } from '@/pages/orchestration/DagMonitorPage'
 import { ConnectionsPage } from '@/pages/connections/ConnectionsPage'
 import { DataSourcesPage, DataSourceDetailPage } from '@/features/datasources'
+import { 
+  PySparkAppsListPage, 
+  PySparkAppBuilderPage, 
+  PySparkAppDetailPage 
+} from '@/pages/pyspark'
+import { SemanticModelsPage, ModelDetailPage } from '@/features/semantic'
+import { DashboardsListPage, DashboardBuilderPage } from '@/features/dashboards'
 
 function App() {
   return (
@@ -50,6 +57,20 @@ function App() {
             <Route path="dags/new" element={<DagBuilderPage />} />
             <Route path="dags/:dagId/edit" element={<DagBuilderPage />} />
             <Route path="dags/:dagId/monitor" element={<DagMonitorPage />} />
+            
+            {/* PySpark Apps */}
+            <Route path="pyspark" element={<PySparkAppsListPage />} />
+            <Route path="pyspark/new" element={<PySparkAppBuilderPage />} />
+            <Route path="pyspark/:id" element={<PySparkAppDetailPage />} />
+            <Route path="pyspark/:id/edit" element={<PySparkAppBuilderPage />} />
+            
+            {/* Semantic Layer */}
+            <Route path="semantic" element={<SemanticModelsPage />} />
+            <Route path="semantic/models/:modelId" element={<ModelDetailPage />} />
+            
+            {/* Analytics Dashboards */}
+            <Route path="dashboards" element={<DashboardsListPage />} />
+            <Route path="dashboards/:dashboardId" element={<DashboardBuilderPage />} />
           </Route>
 
           {/* Catch all */}

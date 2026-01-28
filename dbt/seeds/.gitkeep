@@ -1,0 +1,2 @@
+# Seeds directory for static reference data
+# CSV files placed here can be loaded with `dbt seed`

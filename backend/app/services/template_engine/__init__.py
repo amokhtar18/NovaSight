@@ -30,6 +30,7 @@ from app.services.template_engine.filters import (
     to_pascal_case,
     sql_identifier_safe,
     sql_string_escape,
+    sql_value,
 )
 
 __all__ = [
@@ -48,5 +49,8 @@ __all__ = [
     "to_camel_case",
     "to_pascal_case",
     "sql_identifier_safe",
+    "sql_string_escape",
+    "sql_value",
+]
     "sql_string_escape",
 ]

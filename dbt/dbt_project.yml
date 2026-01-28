@@ -1,0 +1,32 @@
+name: 'novasight'
+version: '1.0.0'
+config-version: 2
+
+profile: 'novasight'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+vars:
+  tenant_id: "{{ env_var('TENANT_ID', '') }}"
+  tenant_database: "tenant_{{ var('tenant_id') }}"
+
+models:
+  novasight:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: ephemeral
+    marts:
+      +materialized: table
+      +schema: marts

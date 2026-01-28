@@ -177,6 +177,140 @@
         }
       }
     },
+    "pyspark/extract_job.py.j2": {
+      "description": "Generates a PySpark extract job for data ingestion",
+      "category": "pyspark",
+      "schema": {
+        "type": "object",
+        "required": ["app_name", "app_id", "tenant_id", "connection", "source", "columns", "target"],
+        "properties": {
+          "app_name": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+            "description": "PySpark application name"
+          },
+          "app_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "connection": {
+            "$ref": "#/definitions/PySparkConnection"
+          },
+          "source": {
+            "$ref": "#/definitions/PySparkSource"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/PySparkColumn"
+            }
+          },
+          "partitions": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": []
+          },
+          "write_mode": {
+            "type": "string",
+            "enum": ["append", "overwrite", "merge"],
+            "default": "append"
+          },
+          "target": {
+            "$ref": "#/definitions/PySparkTarget"
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "batch_size": {"type": "integer", "default": 10000}
+            }
+          },
+          "generated_at": {"type": "string"},
+          "template_version": {"type": "string"}
+        }
+      }
+    },
+    "pyspark/scd_type1.py.j2": {
+      "description": "Generates a PySpark SCD Type 1 job (overwrite)",
+      "category": "pyspark",
+      "schema": {
+        "type": "object",
+        "required": ["app_name", "app_id", "tenant_id", "connection", "source", "columns", "primary_keys", "target"],
+        "properties": {
+          "app_name": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          },
+          "app_id": {"type": "string", "format": "uuid"},
+          "tenant_id": {"type": "string", "format": "uuid"},
+          "connection": {"$ref": "#/definitions/PySparkConnection"},
+          "source": {"$ref": "#/definitions/PySparkSource"},
+          "columns": {
+            "type": "array",
+            "items": {"$ref": "#/definitions/PySparkColumn"}
+          },
+          "primary_keys": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1
+          },
+          "cdc": {"$ref": "#/definitions/PySparkCDC"},
+          "partitions": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": []
+          },
+          "target": {"$ref": "#/definitions/PySparkTarget"},
+          "options": {"type": "object"},
+          "generated_at": {"type": "string"},
+          "template_version": {"type": "string"}
+        }
+      }
+    },
+    "pyspark/scd_type2.py.j2": {
+      "description": "Generates a PySpark SCD Type 2 job (historical tracking)",
+      "category": "pyspark",
+      "schema": {
+        "type": "object",
+        "required": ["app_name", "app_id", "tenant_id", "connection", "source", "columns", "primary_keys", "target"],
+        "properties": {
+          "app_name": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          },
+          "app_id": {"type": "string", "format": "uuid"},
+          "tenant_id": {"type": "string", "format": "uuid"},
+          "connection": {"$ref": "#/definitions/PySparkConnection"},
+          "source": {"$ref": "#/definitions/PySparkSource"},
+          "columns": {
+            "type": "array",
+            "items": {"$ref": "#/definitions/PySparkColumn"}
+          },
+          "primary_keys": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "description": "Primary key columns for record matching"
+          },
+          "cdc": {
+            "$ref": "#/definitions/PySparkCDC",
+            "description": "Change Data Capture configuration"
+          },
+          "partitions": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": []
+          },
+          "target": {"$ref": "#/definitions/PySparkTarget"},
+          "options": {"type": "object"},
+          "generated_at": {"type": "string"},
+          "template_version": {"type": "string"}
+        }
+      }
+    },
     "dbt/sources.yml.j2": {
       "description": "Generates a dbt sources.yml file",
       "category": "dbt",
@@ -1164,6 +1298,159 @@
           }
         }
       }
+    },
+    "sql/analytics_query.sql.j2": {
+      "description": "Generates ClickHouse aggregation queries with grouping and filtering",
+      "category": "sql",
+      "schema": {
+        "type": "object",
+        "required": ["database"],
+        "properties": {
+          "database": {
+            "type": "string",
+            "description": "Target database name (e.g., tenant_123)"
+          },
+          "table": {
+            "type": "string",
+            "default": "events",
+            "description": "Target table name"
+          },
+          "dimensions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["expression", "alias"],
+              "properties": {
+                "expression": {"type": "string"},
+                "alias": {"type": "string"}
+              }
+            },
+            "description": "Dimensions for grouping"
+          },
+          "measures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["aggregation", "expression", "alias"],
+              "properties": {
+                "aggregation": {"type": "string", "enum": ["SUM", "COUNT", "AVG", "MIN", "MAX", "COUNT_DISTINCT"]},
+                "expression": {"type": "string"},
+                "alias": {"type": "string"}
+              }
+            },
+            "description": "Measures to aggregate"
+          },
+          "filters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "column": {"type": "string"},
+                "operator": {"type": "string"},
+                "value": {}
+              }
+            }
+          },
+          "group_by": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "order_by": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "column": {"type": "string"},
+                "direction": {"type": "string", "enum": ["ASC", "DESC"]}
+              }
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000,
+            "default": 1000
+          }
+        }
+      }
+    },
+    "sql/comparison_query.sql.j2": {
+      "description": "Generates ClickHouse comparison queries (e.g., Q1 vs Q2)",
+      "category": "sql",
+      "schema": {
+        "type": "object",
+        "required": ["database", "compare_dimension", "compare_values"],
+        "properties": {
+          "database": {"type": "string"},
+          "table": {"type": "string", "default": "events"},
+          "dimensions": {"type": "array", "items": {"type": "object"}},
+          "measures": {"type": "array", "items": {"type": "object"}},
+          "compare_dimension": {"type": "string", "description": "Dimension to compare across"},
+          "compare_values": {"type": "array", "items": {"type": "string"}, "minItems": 2},
+          "filters": {"type": "array"},
+          "group_by": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "sql/trend_query.sql.j2": {
+      "description": "Generates ClickHouse time-series trend queries",
+      "category": "sql",
+      "schema": {
+        "type": "object",
+        "required": ["database", "time_dimension", "measures"],
+        "properties": {
+          "database": {"type": "string"},
+          "table": {"type": "string", "default": "events"},
+          "time_dimension": {
+            "type": "object",
+            "required": ["expression", "alias"],
+            "properties": {
+              "expression": {"type": "string"},
+              "alias": {"type": "string"}
+            }
+          },
+          "granularity": {
+            "type": "string",
+            "enum": ["hour", "day", "week", "month", "quarter", "year"],
+            "default": "day"
+          },
+          "dimensions": {"type": "array", "items": {"type": "object"}},
+          "measures": {"type": "array", "items": {"type": "object"}},
+          "filters": {"type": "array"},
+          "group_by": {"type": "array", "items": {"type": "string"}},
+          "order_by": {"type": "array"}
+        }
+      }
+    },
+    "sql/top_n_query.sql.j2": {
+      "description": "Generates ClickHouse top N ranking queries",
+      "category": "sql",
+      "schema": {
+        "type": "object",
+        "required": ["database", "dimension", "measures"],
+        "properties": {
+          "database": {"type": "string"},
+          "table": {"type": "string", "default": "events"},
+          "dimension": {
+            "type": "object",
+            "required": ["expression", "alias"],
+            "properties": {
+              "expression": {"type": "string"},
+              "alias": {"type": "string"}
+            }
+          },
+          "measures": {"type": "array", "items": {"type": "object"}},
+          "filters": {"type": "array"},
+          "order_by": {
+            "type": "object",
+            "properties": {
+              "column": {"type": "string"},
+              "direction": {"type": "string", "enum": ["ASC", "DESC"]}
+            }
+          },
+          "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 10}
+        }
+      }
     }
   },
   "definitions": {
@@ -1301,6 +1588,80 @@
         "ttl": {
           "type": "string"
         }
+      }
+    },
+    "PySparkColumn": {
+      "type": "object",
+      "required": ["name", "data_type"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$"
+        },
+        "data_type": {
+          "type": "string"
+        },
+        "include": {
+          "type": "boolean",
+          "default": true
+        },
+        "nullable": {
+          "type": "boolean",
+          "default": true
+        },
+        "comment": {
+          "type": "string"
+        }
+      }
+    },
+    "PySparkConnection": {
+      "type": "object",
+      "required": ["db_type", "host", "port", "database"],
+      "properties": {
+        "id": {"type": "string"},
+        "db_type": {
+          "type": "string",
+          "enum": ["postgresql", "mysql", "oracle", "sqlserver", "clickhouse"]
+        },
+        "host": {"type": "string"},
+        "port": {"type": "integer"},
+        "database": {"type": "string"},
+        "schema": {"type": "string"},
+        "username": {"type": "string"}
+      }
+    },
+    "PySparkSource": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["table", "query"]
+        },
+        "schema": {"type": "string"},
+        "table": {"type": "string"},
+        "query": {"type": "string"}
+      }
+    },
+    "PySparkTarget": {
+      "type": "object",
+      "required": ["database", "table"],
+      "properties": {
+        "database": {"type": "string"},
+        "table": {"type": "string"},
+        "engine": {
+          "type": "string",
+          "default": "MergeTree"
+        }
+      }
+    },
+    "PySparkCDC": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["none", "timestamp", "version", "hash"]
+        },
+        "column": {"type": "string"}
       }
     }
   }

@@ -1,0 +1,81 @@
+"""
+Auto-generated Airflow DAG for PySpark Application: {{ pyspark_app_name }}
+Generated for tenant: {{ tenant_id }}
+PySpark App ID: {{ pyspark_app_id }}
+Generated at: {{ generated_at }}
+
+This DAG runs a pre-defined PySpark job created via the PySpark App Builder.
+The PySpark code was generated from approved templates (ADR-002 compliant).
+"""
+from datetime import datetime, timedelta
+from airflow import DAG
+from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
+from airflow.operators.python import PythonOperator
+from airflow.utils.dates import days_ago
+
+# Default arguments for the DAG
+default_args = {
+    'owner': 'novasight',
+    'depends_on_past': False,
+    'start_date': days_ago(1),
+    'email_on_failure': {{ 'True' if notifications.get('email_on_failure') else 'False' }},
+    'email_on_retry': False,
+    'retries': {{ retries | default(2) }},
+    'retry_delay': timedelta(minutes={{ retry_delay_minutes | default(5) }}),
+    {% if notifications.get('email') %}
+    'email': ['{{ notifications.email }}'],
+    {% endif %}
+}
+
+# DAG definition
+with DAG(
+    dag_id='{{ dag_id }}',
+    default_args=default_args,
+    description='{{ pyspark_app_description | default("PySpark data pipeline", true) }}',
+    schedule_interval='{{ schedule }}',
+    catchup=False,
+    max_active_runs=1,
+    tags=[
+        'pyspark',
+        'tenant_{{ tenant_id }}',
+        '{{ scd_type }}',
+        '{{ write_mode }}',
+        {% if source_type %}'source_{{ source_type }}',{% endif %}
+    ],
+) as dag:
+    
+    # Task to submit pre-generated PySpark job to Spark cluster
+    run_pyspark_job = SparkSubmitOperator(
+        task_id='run_{{ pyspark_app_name | lower | replace(" ", "_") | replace("-", "_") }}',
+        application='{{ spark_app_path }}',
+        name='{{ pyspark_app_name }}',
+        conn_id='spark_default',  # Airflow connection to Spark cluster
+        conf={
+            {% for key, value in spark_conf.items() %}
+            '{{ key }}': '{{ value }}',
+            {% endfor %}
+        },
+        jars='/opt/spark/jars/postgresql-42.6.0.jar,/opt/spark/jars/mysql-connector-j-8.2.0.jar,/opt/spark/jars/clickhouse-jdbc-0.4.6-all.jar',
+        driver_memory='1g',
+        executor_memory='{{ spark_conf.get("spark.executor.memory", "2g") }}',
+        executor_cores={{ spark_conf.get("spark.executor.cores", "2") }},
+        num_executors=None,  # Dynamic allocation enabled
+        verbose=True,
+    )
+    
+    def log_completion(**context):
+        """Log completion of PySpark job."""
+        ti = context['ti']
+        print(f"PySpark job completed: {{ pyspark_app_name }}")
+        print(f"Target: {{ target_database }}.{{ target_table }}")
+        print(f"SCD Type: {{ scd_type }}, Write Mode: {{ write_mode }}")
+        print(f"Template Version: {{ template_version }}")
+    
+    log_task = PythonOperator(
+        task_id='log_completion',
+        python_callable=log_completion,
+        provide_context=True,
+    )
+    
+    # Task dependencies
+    run_pyspark_job >> log_task

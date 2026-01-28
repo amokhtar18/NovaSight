@@ -126,29 +126,44 @@ def sql_identifier_safe(value: str, max_length: int = 63) -> str:
     return result[:max_length]
 
 
-def sql_string_escape(value: str) -> str:
+def sql_string_escape(value: Any) -> str:
     """
-    Escape a string for safe use in SQL string literals.
+    Escape and quote a value for safe use in SQL.
     
     This is for VALUES only - for identifiers use sql_identifier_safe.
-    Note: Parameters should still be used via prepared statements when possible.
+    Handles different types appropriately:
+    - None -> NULL
+    - bool -> 1/0
+    - int/float -> unquoted number
+    - str -> escaped and quoted string
     
     Args:
-        value: The string to escape
+        value: The value to escape
     
     Returns:
-        Escaped string safe for SQL string literal
+        Escaped value safe for SQL literal
     """
     if value is None:
         return "NULL"
     
-    # Escape single quotes by doubling them
-    escaped = str(value).replace("'", "''")
+    if isinstance(value, bool):
+        return "1" if value else "0"
     
-    # Escape backslashes
+    if isinstance(value, (int, float)):
+        return str(value)
+    
+    # String value - escape and quote
+    escaped = str(value).replace("'", "''")
     escaped = escaped.replace("\\", "\\\\")
     
-    return escaped
+    return f"'{escaped}'"
+
+
+def sql_value(value: Any) -> str:
+    """
+    Alias for sql_string_escape for backward compatibility.
+    """
+    return sql_string_escape(value)
 
 
 def sql_type_mapping(python_type: str, database: str = "postgresql") -> str:

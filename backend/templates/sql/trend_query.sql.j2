@@ -1,0 +1,71 @@
+{#
+NovaSight Trend Query Template
+===============================
+
+Generates time-series trend queries with configurable granularity.
+Supports day, week, month, quarter, and year granularities.
+
+Parameters:
+- database: Target database name
+- table: Target table name
+- time_dimension: {expression, alias} for time dimension
+- granularity: Time granularity (day, week, month, quarter, year, hour)
+- dimensions: Optional list of {expression, alias} for additional grouping
+- measures: List of {aggregation, expression, alias}
+- filters: Optional filters
+- group_by: List of column names for additional grouping
+- order_by: List of {column, direction}
+#}
+SELECT
+{% if granularity == 'hour' %}
+    toStartOfHour({{ time_dimension.expression }}) AS time_period,
+{% elif granularity == 'day' %}
+    toDate({{ time_dimension.expression }}) AS time_period,
+{% elif granularity == 'week' %}
+    toStartOfWeek({{ time_dimension.expression }}) AS time_period,
+{% elif granularity == 'month' %}
+    toStartOfMonth({{ time_dimension.expression }}) AS time_period,
+{% elif granularity == 'quarter' %}
+    toStartOfQuarter({{ time_dimension.expression }}) AS time_period,
+{% elif granularity == 'year' %}
+    toStartOfYear({{ time_dimension.expression }}) AS time_period,
+{% else %}
+    toDate({{ time_dimension.expression }}) AS time_period,
+{% endif %}
+{% for dim in dimensions %}
+    {{ dim.expression }} AS {{ dim.alias | sql_safe }},
+{% endfor %}
+{% for measure in measures %}
+    {{ measure.aggregation }}({{ measure.expression }}) AS {{ measure.alias | sql_safe }}{% if not loop.last %},{% endif %}
+
+{% endfor %}
+FROM {{ database }}.{{ table | default('events') }}
+{% if filters %}
+WHERE 1=1
+{% for filter in filters %}
+{% if filter.operator == 'IN' %}
+    AND {{ filter.column | sql_safe }} IN ({% for val in filter.value %}{{ val | sql_escape }}{% if not loop.last %}, {% endif %}{% endfor %})
+{% elif filter.operator == 'NOT IN' %}
+    AND {{ filter.column | sql_safe }} NOT IN ({% for val in filter.value %}{{ val | sql_escape }}{% if not loop.last %}, {% endif %}{% endfor %})
+{% elif filter.operator == 'BETWEEN' %}
+    AND {{ filter.column | sql_safe }} BETWEEN {{ filter.value.start | sql_escape }} AND {{ filter.value.end | sql_escape }}
+{% elif filter.operator == 'IS NULL' %}
+    AND {{ filter.column | sql_safe }} IS NULL
+{% elif filter.operator == 'IS NOT NULL' %}
+    AND {{ filter.column | sql_safe }} IS NOT NULL
+{% else %}
+    AND {{ filter.column | sql_safe }} {{ filter.operator }} {{ filter.value | sql_escape }}
+{% endif %}
+{% endfor %}
+{% endif %}
+GROUP BY time_period{% if group_by and group_by | length > 0 %}, {% for col in group_by %}{{ col | sql_safe }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+
+{% if order_by and order_by | length > 0 %}
+ORDER BY 
+{% for ob in order_by %}
+    {{ ob.column | sql_safe }} {{ ob.direction | upper }}{% if not loop.last %},{% endif %}
+
+{% endfor %}
+{% else %}
+ORDER BY time_period ASC
+{% endif %}

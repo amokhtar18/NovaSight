@@ -1,0 +1,60 @@
+{#
+NovaSight Comparison Query Template
+====================================
+
+Generates comparison queries for comparing values across a dimension.
+Uses CASE statements for side-by-side comparison.
+
+Parameters:
+- database: Target database name
+- table: Target table name
+- dimensions: List of {expression, alias} for grouping
+- measures: List of {aggregation, expression, alias}
+- compare_dimension: Dimension to compare across
+- compare_values: List of values to compare
+- filters: Optional filters
+- group_by: List of column names for grouping
+#}
+SELECT
+{% for dim in dimensions %}
+    {{ dim.expression }} AS {{ dim.alias | sql_safe }},
+{% endfor %}
+{% for value in compare_values %}
+{% for measure in measures %}
+    {{ measure.aggregation }}(
+        CASE WHEN {{ compare_dimension | sql_safe }} = {{ value | sql_escape }}
+             THEN {{ measure.expression }}
+             ELSE NULL
+        END
+    ) AS {{ measure.alias | sql_safe }}_{{ value | sql_safe | replace(' ', '_') }}{% if not loop.last or not loop.parent.last %},{% endif %}
+
+{% endfor %}
+{% endfor %}
+{% for measure in measures %}
+    ,{{ measure.aggregation }}({{ measure.expression }}) AS {{ measure.alias | sql_safe }}_total
+{% endfor %}
+FROM {{ database }}.{{ table | default('events') }}
+WHERE {{ compare_dimension | sql_safe }} IN ({% for val in compare_values %}{{ val | sql_escape }}{% if not loop.last %}, {% endif %}{% endfor %})
+{% if filters %}
+{% for filter in filters %}
+{% if filter.operator == 'IN' %}
+    AND {{ filter.column | sql_safe }} IN ({% for val in filter.value %}{{ val | sql_escape }}{% if not loop.last %}, {% endif %}{% endfor %})
+{% elif filter.operator == 'NOT IN' %}
+    AND {{ filter.column | sql_safe }} NOT IN ({% for val in filter.value %}{{ val | sql_escape }}{% if not loop.last %}, {% endif %}{% endfor %})
+{% elif filter.operator == 'BETWEEN' %}
+    AND {{ filter.column | sql_safe }} BETWEEN {{ filter.value.start | sql_escape }} AND {{ filter.value.end | sql_escape }}
+{% elif filter.operator == 'IS NULL' %}
+    AND {{ filter.column | sql_safe }} IS NULL
+{% elif filter.operator == 'IS NOT NULL' %}
+    AND {{ filter.column | sql_safe }} IS NOT NULL
+{% else %}
+    AND {{ filter.column | sql_safe }} {{ filter.operator }} {{ filter.value | sql_escape }}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if group_by and group_by | length > 0 %}
+GROUP BY {% for col in group_by %}{{ col | sql_safe }}{% if not loop.last %}, {% endif %}{% endfor %}
+
+{% endif %}
+ORDER BY {% if group_by and group_by | length > 0 %}{{ group_by[0] | sql_safe }}{% else %}1{% endif %}
+
