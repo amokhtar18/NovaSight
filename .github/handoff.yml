@@ -294,7 +294,7 @@ handoff_rules:
 
   # AI tasks
   - patterns:
-      - "ai|llm|ollama"
+      - "\\bai\\b|llm|ollama"
       - "natural language|nl2sql|nlq"
       - "intent|classification|prompt"
     target: ai
