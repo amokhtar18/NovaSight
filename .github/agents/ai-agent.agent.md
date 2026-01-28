@@ -1,19 +1,10 @@
+---
+name: "AI Integration Agent"
+description: "Ollama integration, NL2SQL, natural language processing"
+tools: ['vscode/vscodeAPI', 'vscode/extensions', 'read', 'edit', 'search', 'web']
+---
+
 # AI Integration Agent
-
-## ⚙️ Configuration
-
-```yaml
-preferred_model: opus 4.5
-required_tools:
-  - read_file
-  - create_file
-  - replace_string_in_file
-  - list_dir
-  - file_search
-  - grep_search
-  - semantic_search
-  - fetch_webpage
-```
 
 ## 🎯 Role
 

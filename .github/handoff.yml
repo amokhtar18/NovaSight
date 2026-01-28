@@ -294,7 +294,7 @@ handoff_rules:
 
   # AI tasks
   - patterns:
-      - "ai|llm|ollama"
+      - "\\bai\\b|llm|ollama"
       - "natural language|nl2sql|nlq"
       - "intent|classification|prompt"
     target: ai
@@ -554,7 +554,8 @@ delegation:
 # PRIORITY RESOLUTION
 # ============================================
 # When multiple patterns match, use this priority order:
-# 1. security (highest) - security-critical tasks
+# 0. novasight-orchestrator - master coordinator (highest priority)
+# 1. security - security-critical tasks
 # 2. template-engine - code generation tasks
 # 3. Specific domain agent (ai, dbt, orchestration, etc.)
 # 4. backend/frontend - general implementation
@@ -562,6 +563,7 @@ delegation:
 # 6. infrastructure (lowest for non-infra tasks)
 
 priority_order:
+  - novasight-orchestrator
   - security
   - template-engine
   - ai

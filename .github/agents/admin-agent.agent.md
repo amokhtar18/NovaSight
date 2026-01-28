@@ -1,17 +1,10 @@
+---
+name: "Admin & Tenant Management Agent"
+description: "Tenant management, user management, RBAC, admin portal"
+tools: ['vscode/vscodeAPI', 'vscode/extensions', 'read', 'edit', 'search', 'web']
+---
+
 # Admin & Tenant Management Agent
-
-## ⚙️ Configuration
-
-```yaml
-preferred_model: haiku 4.5
-required_tools:
-  - read_file
-  - create_file
-  - replace_string_in_file
-  - list_dir
-  - file_search
-  - grep_search
-```
 
 ## 🎯 Role
 

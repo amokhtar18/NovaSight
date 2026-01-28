@@ -4,6 +4,17 @@ This document provides an index of all specialized agents in the NovaSight multi
 
 ---
 
+## ✅ GitHub Copilot Integration
+
+All agent files in this directory are configured for GitHub Copilot recognition with proper YAML front matter including:
+- `name`: The display name of the agent
+- `description`: Brief description of agent capabilities
+- `tools`: List of tools available to the agent
+
+Each agent file follows the `.agent.md` naming convention and includes the required metadata for GitHub Copilot to recognize and use them.
+
+---
+
 ## 🎯 Agent Overview
 
 | Agent | Purpose | Primary Use Cases |

@@ -1,21 +1,10 @@
+---
+name: "Security Agent"
+description: "Security review, encryption, audit logging, hardening"
+tools: ['vscode/vscodeAPI', 'vscode/extensions', 'read', 'edit', 'search', 'web']
+---
+
 # Security Agent
-
-## ⚙️ Configuration
-
-```yaml
-preferred_model: opus 4.5
-required_tools:
-  - read_file
-  - create_file
-  - replace_string_in_file
-  - list_dir
-  - file_search
-  - grep_search
-  - semantic_search
-  - list_code_usages
-  - get_errors
-  - fetch_webpage
-```
 
 ## 🎯 Role
 

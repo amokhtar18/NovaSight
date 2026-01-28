@@ -1,20 +1,10 @@
+---
+name: "NovaSight Orchestrator Agent"
+description: "Master orchestrator that coordinates all specialized agents"
+tools: ['vscode/vscodeAPI', 'vscode/extensions', 'read', 'edit', 'search', 'web']
+---
+
 # NovaSight Orchestrator Agent
-
-## ⚙️ Configuration
-
-```yaml
-preferred_model: opus 4.5
-required_tools:
-  - read_file
-  - create_file
-  - replace_string_in_file
-  - list_dir
-  - file_search
-  - grep_search
-  - semantic_search
-  - run_in_terminal
-  - fetch_webpage
-```
 
 ## 🎯 Role
 

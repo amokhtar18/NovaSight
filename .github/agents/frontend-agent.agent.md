@@ -1,20 +1,10 @@
+---
+name: "Frontend Agent"
+description: "React components, TypeScript, UI/UX implementation"
+tools: ['vscode/vscodeAPI', 'vscode/extensions', 'read', 'edit', 'search', 'web']
+---
+
 # Frontend Agent
-
-## ⚙️ Configuration
-
-```yaml
-preferred_model: sonnet 4.5
-required_tools:
-  - read_file
-  - create_file
-  - replace_string_in_file
-  - list_dir
-  - file_search
-  - grep_search
-  - semantic_search
-  - get_errors
-  - fetch_webpage
-```
 
 ## 🎯 Role
 

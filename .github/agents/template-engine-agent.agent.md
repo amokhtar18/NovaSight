@@ -1,18 +1,10 @@
+---
+name: "Template Engine Agent"
+description: "Jinja2 templates for code generation (DAGs, PySpark, dbt)"
+tools: ['vscode/vscodeAPI', 'vscode/extensions', 'read', 'edit', 'search', 'web']
+---
+
 # Template Engine Agent
-
-## ⚙️ Configuration
-
-```yaml
-preferred_model: opus 4.5
-required_tools:
-  - read_file
-  - create_file
-  - replace_string_in_file
-  - list_dir
-  - file_search
-  - grep_search
-  - get_errors
-```
 
 ## 🎯 Role
 

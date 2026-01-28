@@ -1,18 +1,10 @@
+---
+name: "dbt Semantic Layer Agent"
+description: "dbt models, semantic layer, data transformations"
+tools: ['vscode/vscodeAPI', 'vscode/extensions', 'read', 'edit', 'search', 'web']
+---
+
 # dbt Semantic Layer Agent
-
-## ⚙️ Configuration
-
-```yaml
-preferred_model: sonnet 4.5
-required_tools:
-  - read_file
-  - create_file
-  - replace_string_in_file
-  - list_dir
-  - file_search
-  - grep_search
-  - fetch_webpage
-```
 
 ## 🎯 Role
 

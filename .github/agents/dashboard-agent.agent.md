@@ -1,19 +1,10 @@
+---
+name: "Dashboard & Analytics Agent"
+description: "Analytics dashboards, charts, visualizations, SQL editor"
+tools: ['vscode/vscodeAPI', 'vscode/extensions', 'read', 'edit', 'search', 'web']
+---
+
 # Dashboard & Analytics Agent
-
-## ⚙️ Configuration
-
-```yaml
-preferred_model: sonnet 4.5
-required_tools:
-  - read_file
-  - create_file
-  - replace_string_in_file
-  - list_dir
-  - file_search
-  - grep_search
-  - semantic_search
-  - fetch_webpage
-```
 
 ## 🎯 Role
 
