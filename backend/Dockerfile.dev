@@ -10,16 +10,29 @@ ENV PYTHONUNBUFFERED=1
 ENV FLASK_APP=app
 ENV FLASK_ENV=development
 ENV DEBIAN_FRONTEND=noninteractive
+ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_5:$LD_LIBRARY_PATH
 
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies including Oracle Instant Client requirements
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     libpq-dev \
     build-essential \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    libaio1t64 \
+    wget \
+    unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1
+
+# Install Oracle Instant Client for thick mode support (older Oracle DB versions)
+RUN mkdir -p /opt/oracle && \
+    wget -q https://download.oracle.com/otn_software/linux/instantclient/2350000/instantclient-basiclite-linux.x64-23.5.0.24.07.zip -O /tmp/instantclient.zip && \
+    unzip -q /tmp/instantclient.zip -d /opt/oracle && \
+    rm /tmp/instantclient.zip && \
+    echo /opt/oracle/instantclient_23_5 > /etc/ld.so.conf.d/oracle-instantclient.conf && \
+    ldconfig
 
 # Copy and install Python dependencies
 COPY requirements.txt .

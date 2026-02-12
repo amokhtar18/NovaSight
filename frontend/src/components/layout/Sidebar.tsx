@@ -1,47 +1,69 @@
 import { Link, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import {
-  LayoutDashboard,
+  Home,
   Database,
   GitBranch,
-  Table2,
   BarChart3,
   Settings,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
   Boxes,
-  MessageSquare,
   Book,
   Shield,
   Key,
   FileText,
-  Layers,
-  HardDrive,
   Code2,
+  Users,
+  Server,
+  Building2,
+  Upload,
+  CalendarClock,
+  FlaskConical,
+  PieChart,
+  LayoutDashboard,
+  Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 
-const navigation = [
-  { name: 'Dashboard', href: '/app/dashboard', icon: LayoutDashboard },
-  { name: 'Ask Data', href: '/app/query', icon: MessageSquare },
-  { name: 'SQL Editor', href: '/app/sql', icon: Code2 },
+// Main navigation - visible to all users
+const mainNavigation = [
   { name: 'Connections', href: '/app/connections', icon: Database },
-  { name: 'DAGs', href: '/app/dags', icon: GitBranch },
-  { name: 'PySpark Apps', href: '/app/pyspark', icon: Sparkles },
+]
+
+// Orchestrate your Data section
+const orchestrateNavigation = [
+  { name: 'Extract & Load', href: '/app/pyspark', icon: Upload },
+  { name: 'Task Scheduler', href: '/app/dags', icon: CalendarClock },
   { name: 'Semantic Layer', href: '/app/semantic', icon: Boxes },
-  { name: 'Dashboards', href: '/app/dashboards', icon: BarChart3 },
+  { name: 'Tests', href: '/app/admin/dbt', icon: FlaskConical },
+  { name: 'SQL Editor', href: '/app/sql', icon: Code2 },
+  { name: 'Charts', href: '/app/charts', icon: PieChart },
+  { name: 'Dashboards', href: '/app/dashboards', icon: LayoutDashboard },
+]
+
+// AI-powered navigation (special highlight)
+const aiNavigation = {
+  name: 'Ask AI',
+  href: '/app/query',
+  icon: Sparkles,
+  description: 'Natural language to SQL',
+}
+
+// Administration section
+const adminNavigation = [
   { name: 'Documentation', href: '/app/docs', icon: Book },
   { name: 'Settings', href: '/app/settings', icon: Settings },
 ]
 
-const adminNavigation = [
-  { name: 'dbt Operations', href: '/app/admin/dbt', icon: Layers },
-  { name: 'Audit Logs', href: '/app/admin/audit', icon: FileText },
+// Portal Management (Super Admin only)
+const portalNavigation = [
+  { name: 'Infrastructure', href: '/app/portal/infrastructure', icon: Server },
+  { name: 'Tenant Management', href: '/app/portal/tenants', icon: Building2 },
   { name: 'Roles & Permissions', href: '/app/admin/roles', icon: Key },
-  { name: 'Backup & Recovery', href: '/app/admin/backups', icon: HardDrive },
+  { name: 'Audit Logs', href: '/app/admin/audit', icon: FileText },
 ]
 
 export function Sidebar() {
@@ -50,7 +72,31 @@ export function Sidebar() {
   const { user } = useAuth()
 
   const isSuperAdmin = user?.roles?.includes('super_admin')
-  const isAdmin = user?.roles?.includes('admin') || isSuperAdmin
+  const isTenantAdmin = user?.roles?.includes('tenant_admin')
+  const canManageUsers = isSuperAdmin || isTenantAdmin
+  
+  // Get tenant name for home display
+  const tenantName = user?.tenant_name || 'Home'
+
+  const renderNavItem = (item: { name: string; href: string; icon: React.ElementType }, customName?: string) => {
+    const isActive = location.pathname === item.href || 
+      (item.href !== '/app/dashboard' && location.pathname.startsWith(item.href))
+    return (
+      <Link
+        key={item.name}
+        to={item.href}
+        className={cn(
+          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+          isActive
+            ? 'bg-primary text-primary-foreground'
+            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+        )}
+      >
+        <item.icon className="h-5 w-5 shrink-0" />
+        {!collapsed && <span>{customName || item.name}</span>}
+      </Link>
+    )
+  }
 
   return (
     <div
@@ -71,74 +117,124 @@ export function Sidebar() {
         </Link>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 space-y-1 px-2 py-4">
-        {navigation.map((item) => {
-          const isActive = location.pathname.startsWith(item.href)
-          return (
-            <Link
-              key={item.name}
-              to={item.href}
-              className={cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-              )}
-            >
-              <item.icon className="h-5 w-5 shrink-0" />
-              {!collapsed && <span>{item.name}</span>}
-            </Link>
-          )
-        })}
-      </nav>
+      {/* Main Navigation */}
+      <nav className="flex-1 overflow-y-auto px-2 py-4 space-y-6">
+        {/* Tenant Home */}
+        <div>
+          <Link
+            to="/app/dashboard"
+            className={cn(
+              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              location.pathname === '/app/dashboard'
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            )}
+          >
+            <Home className="h-5 w-5 shrink-0" />
+            {!collapsed && <span>{tenantName} Home</span>}
+          </Link>
+        </div>
 
-      {/* Admin Navigation (Admin & Super Admin) */}
-      {isAdmin && (
-        <div className="border-t px-2 py-3">
+        {/* Manage Connections */}
+        <div>
+          {!collapsed && (
+            <p className="px-3 mb-2 text-xs font-semibold uppercase text-muted-foreground tracking-wider">
+              Manage Connections
+            </p>
+          )}
+          {mainNavigation.map((item) => renderNavItem(item))}
+        </div>
+
+        {/* Orchestrate your Data */}
+        <div>
+          {!collapsed && (
+            <p className="px-3 mb-2 text-xs font-semibold uppercase text-muted-foreground tracking-wider">
+              Orchestrate your Data
+            </p>
+          )}
+          {orchestrateNavigation.map((item) => renderNavItem(item))}
+        </div>
+
+        {/* Ask AI - Special Highlight */}
+        <div>
+          <Link
+            to={aiNavigation.href}
+            className={cn(
+              'group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
+              location.pathname === aiNavigation.href
+                ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-lg shadow-violet-500/25'
+                : 'bg-gradient-to-r from-violet-500/10 to-indigo-500/10 text-violet-700 dark:text-violet-300 hover:from-violet-500/20 hover:to-indigo-500/20 hover:shadow-md hover:shadow-violet-500/10 border border-violet-500/20'
+            )}
+          >
+            <div className={cn(
+              'relative',
+              location.pathname !== aiNavigation.href && 'animate-pulse'
+            )}>
+              <aiNavigation.icon className="h-5 w-5 shrink-0" />
+              <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-violet-500 animate-ping" />
+              <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-violet-400" />
+            </div>
+            {!collapsed && (
+              <div className="flex flex-col">
+                <span className="font-semibold">{aiNavigation.name}</span>
+                <span className={cn(
+                  'text-xs',
+                  location.pathname === aiNavigation.href 
+                    ? 'text-violet-200' 
+                    : 'text-violet-500 dark:text-violet-400'
+                )}>
+                  {aiNavigation.description}
+                </span>
+              </div>
+            )}
+          </Link>
+        </div>
+
+        {/* Administration */}
+        <div>
           {!collapsed && (
             <p className="px-3 mb-2 text-xs font-semibold uppercase text-muted-foreground tracking-wider">
               Administration
             </p>
           )}
-          {adminNavigation.map((item) => {
-            const isActive = location.pathname.startsWith(item.href)
-            return (
-              <Link
-                key={item.name}
-                to={item.href}
-                className={cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                )}
-              >
-                <item.icon className="h-5 w-5 shrink-0" />
-                {!collapsed && <span>{item.name}</span>}
-              </Link>
-            )
-          })}
+          {adminNavigation.map((item) => renderNavItem(item))}
         </div>
-      )}
 
-      {/* Portal Management (Super Admin only) */}
-      {isSuperAdmin && (
-        <div className="border-t px-2 py-3">
-          <Link
-            to="/app/portal"
-            className={cn(
-              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-              location.pathname.startsWith('/app/portal')
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+        {/* User Management (Tenant Admin - non Super Admin) */}
+        {isTenantAdmin && !isSuperAdmin && (
+          <div>
+            {!collapsed && (
+              <p className="px-3 mb-2 text-xs font-semibold uppercase text-muted-foreground tracking-wider">
+                Organization
+              </p>
             )}
-          >
-            <Shield className="h-5 w-5 shrink-0" />
-            {!collapsed && <span>Portal Management</span>}
-          </Link>
-        </div>
-      )}
+            <Link
+              to="/app/admin/users"
+              className={cn(
+                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                location.pathname.startsWith('/app/admin/users')
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+              )}
+            >
+              <Users className="h-5 w-5 shrink-0" />
+              {!collapsed && <span>User Management</span>}
+            </Link>
+          </div>
+        )}
+
+        {/* Portal Management (Super Admin only) */}
+        {isSuperAdmin && (
+          <div>
+            {!collapsed && (
+              <p className="px-3 mb-2 text-xs font-semibold uppercase text-muted-foreground tracking-wider">
+                Portal Management
+              </p>
+            )}
+            {portalNavigation.map((item) => renderNavItem(item))}
+          </div>
+        )}
+      </nav>
 
       {/* Collapse toggle */}
       <div className="border-t p-2">

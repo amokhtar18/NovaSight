@@ -9,8 +9,10 @@ export { SqlEditorPage } from './pages/SqlEditorPage'
 // Components
 export { SQLEditor } from './components/SQLEditor'
 export { ResultsTable } from './components/ResultsTable'
+export { SQLResultsChart } from './components/SQLResultsChart'
 export { SchemaExplorer } from './components/SchemaExplorer'
 export { QueryTabs } from './components/QueryTabs'
+export { SavedQueriesList } from './components/SavedQueriesList'
 
 // Hooks
 export { useSqlQuery } from './hooks/useSqlQuery'

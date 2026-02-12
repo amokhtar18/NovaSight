@@ -75,9 +75,11 @@ from app.domains.datasources.infrastructure.connectors.postgresql import (
     PostgreSQLConnector,
 )
 from app.domains.datasources.infrastructure.connectors.mysql import MySQLConnector
+from app.domains.datasources.infrastructure.connectors.oracle import OracleConnector
 
 ConnectorRegistry.register(PostgreSQLConnector)
 ConnectorRegistry.register(MySQLConnector)
+ConnectorRegistry.register(OracleConnector)
 
 logger.info(
     f"Registered {len(ConnectorRegistry.list_connectors())} connectors: "

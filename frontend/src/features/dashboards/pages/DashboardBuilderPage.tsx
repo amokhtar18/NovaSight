@@ -10,6 +10,7 @@ import { DashboardToolbar } from '../components/DashboardToolbar'
 import { WidgetRenderer } from '../components/WidgetRenderer'
 import { WidgetConfigPanel } from '../components/WidgetConfigPanel'
 import { AddWidgetDialog } from '../components/AddWidgetDialog'
+import { AddChartToDashboardDialog } from '../components/AddChartToDashboardDialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Widget } from '@/types/dashboard'
 
@@ -113,7 +114,12 @@ export function DashboardBuilderPage() {
           ))}
         </GridLayout>
         
-        {isEditing && <AddWidgetDialog dashboardId={dashboardId!} />}
+        {isEditing && (
+          <>
+            <AddWidgetDialog dashboardId={dashboardId!} />
+            <AddChartToDashboardDialog dashboardId={dashboardId!} />
+          </>
+        )}
       </div>
       
       {selectedWidget && isEditing && (

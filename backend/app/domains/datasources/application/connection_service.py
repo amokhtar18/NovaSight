@@ -239,6 +239,7 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
         username: str,
         password: str,
         ssl_mode: Optional[str] = None,
+        extra_params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Test connection parameters without saving."""
         try:
@@ -250,6 +251,7 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
                 password=password,
                 ssl_mode=ssl_mode,
                 ssl=bool(ssl_mode),
+                extra_params=extra_params or {},
             )
 
             connector = ConnectorRegistry.create_connector(db_type, config)
@@ -289,8 +291,16 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
         connection_id: str,
         schema_name: Optional[str] = None,
         include_columns: bool = False,
+        schemas_only: bool = False,
     ) -> Optional[Dict[str, Any]]:
-        """Get database schema information using connector framework."""
+        """Get database schema information using connector framework.
+        
+        Args:
+            connection_id: The connection UUID
+            schema_name: Optional specific schema to fetch (None = all schemas)
+            include_columns: Whether to fetch column details for each table
+            schemas_only: If True, only return schema names (fast mode for initial load)
+        """
         connection = self.get_connection(connection_id)
         if not connection:
             return None
@@ -316,15 +326,35 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
 
             with connector:
                 schemas = connector.get_schemas()
+                
+                # Fast mode: only return schema names without fetching tables
+                if schemas_only:
+                    return {
+                        "schemas": [{"name": s, "tables": []} for s in schemas],
+                        "total_tables": 0,
+                        "total_columns": 0,
+                    }
+                
                 tables_by_schema = {}
                 target_schemas = [schema_name] if schema_name else schemas
                 total_tables = 0
                 total_columns = 0
+                
+                # Limit number of schemas to process when fetching all
+                # (prevents very slow queries on databases with many schemas)
+                MAX_SCHEMAS_AUTO = 20
+                if not schema_name and len(target_schemas) > MAX_SCHEMAS_AUTO:
+                    logger.warning(
+                        f"Database has {len(target_schemas)} schemas, limiting to first {MAX_SCHEMAS_AUTO}. "
+                        "Use schema_name parameter to fetch specific schema."
+                    )
+                    target_schemas = target_schemas[:MAX_SCHEMAS_AUTO]
 
                 for schema in target_schemas:
                     if schema not in schemas:
                         continue
 
+                    logger.debug(f"Fetching tables for schema: {schema}")
                     tables = connector.get_tables(schema)
                     tables_dict = []
                     for table in tables:

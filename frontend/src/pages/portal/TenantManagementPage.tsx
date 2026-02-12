@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -55,6 +56,8 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  Users,
+  ExternalLink,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -78,6 +81,7 @@ const planColors: Record<string, string> = {
 }
 
 export const TenantManagementPage: React.FC = () => {
+  const navigate = useNavigate()
   const { toast } = useToast()
   const [data, setData] = useState<PaginatedResponse<PortalTenant> | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -267,7 +271,12 @@ export const TenantManagementPage: React.FC = () => {
                             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-sm">
                               {tenant.name.charAt(0).toUpperCase()}
                             </div>
-                            <span className="font-medium">{tenant.name}</span>
+                            <button 
+                              className="font-medium hover:text-primary hover:underline text-left"
+                              onClick={() => navigate(`/app/portal/tenants/${tenant.id}`)}
+                            >
+                              {tenant.name}
+                            </button>
                           </div>
                         </td>
                         <td className="p-3">
@@ -294,6 +303,15 @@ export const TenantManagementPage: React.FC = () => {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => navigate(`/app/portal/tenants/${tenant.id}`)}>
+                                <ExternalLink className="h-4 w-4 mr-2" />
+                                View Details
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => navigate(`/app/portal/tenants/${tenant.id}?tab=users`)}>
+                                <Users className="h-4 w-4 mr-2" />
+                                Manage Users
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => setEditingTenant(tenant)}>
                                 <Edit className="h-4 w-4 mr-2" />
                                 Edit

@@ -95,8 +95,8 @@ class PasswordService:
         """
         if not password:
             return False, "Password is required"
-        if len(password) < 12:
-            return False, "Password must be at least 12 characters long"
+        if len(password) < 8:
+            return False, "Password must be at least 8 characters long"
         if len(password) > 128:
             return False, "Password must be 128 characters or less"
         if not re.search(r"[A-Z]", password):

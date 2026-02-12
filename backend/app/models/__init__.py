@@ -61,6 +61,10 @@ _register(
     "app.domains.analytics.domain.models",
     "Dashboard", "Widget", "WidgetType",
 )
+_register(
+    "app.domains.analytics.domain.chart_models",
+    "Chart", "ChartFolder", "ChartType", "ChartSourceType", "DashboardChart",
+)
 
 
 def __getattr__(name: str):
@@ -125,6 +129,12 @@ __all__ = [
     "Dashboard",
     "Widget",
     "WidgetType",
+    # Chart models
+    "Chart",
+    "ChartFolder",
+    "ChartType",
+    "ChartSourceType",
+    "DashboardChart",
     # Infrastructure config models
     "InfrastructureConfig",
     "InfrastructureType",

@@ -17,6 +17,7 @@ from app.domains.datasources.domain.value_objects import ColumnInfo, TableInfo
 from app.domains.datasources.infrastructure.connectors.registry import ConnectorRegistry
 from app.domains.datasources.infrastructure.connectors.postgresql import PostgreSQLConnector
 from app.domains.datasources.infrastructure.connectors.mysql import MySQLConnector
+from app.domains.datasources.infrastructure.connectors.oracle import OracleConnector
 
 __all__ = [
     "BaseConnector",
@@ -28,4 +29,5 @@ __all__ = [
     "ConnectorRegistry",
     "PostgreSQLConnector",
     "MySQLConnector",
+    "OracleConnector",
 ]

@@ -161,8 +161,13 @@ export const portalAdminService = {
   },
 
   async createUser(data: PortalUserCreateData): Promise<{ user: PortalUser; message: string }> {
-    const response = await apiClient.post(`${ADMIN_BASE}/portal/users`, data)
-    return response.data
+    try {
+      const response = await apiClient.post(`${ADMIN_BASE}/portal/users`, data)
+      return response.data
+    } catch (error: any) {
+      const message = error.response?.data?.error?.message || error.response?.data?.message || 'Failed to create user'
+      throw new Error(message)
+    }
   },
 
   async getUser(id: string): Promise<{ user: PortalUser }> {

@@ -66,13 +66,16 @@ def create_user():
         if not data.get(field):
             raise ValidationError(f"Field '{field}' is required")
 
-    user_service = UserService(tenant_id)
-    user = user_service.create_user(
-        email=data["email"],
-        name=data["name"],
-        password=data["password"],
-        role_names=data.get("roles", ["viewer"]),
-    )
+    try:
+        user_service = UserService(tenant_id)
+        user = user_service.create_user(
+            email=data["email"],
+            name=data["name"],
+            password=data["password"],
+            role_names=data.get("roles", ["viewer"]),
+        )
+    except ValueError as e:
+        raise ValidationError(str(e))
 
     logger.info(f"User '{data['email']}' created in tenant {tenant_id}")
 

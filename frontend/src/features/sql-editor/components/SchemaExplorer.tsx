@@ -1,24 +1,41 @@
 /**
  * Schema Explorer Component
  * Sidebar for exploring database schemas, tables, and columns
+ * With schema selector, datatype display, and bulk actions
  */
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   ChevronRight,
   ChevronDown,
   Database,
   Table2,
-  Columns,
   Key,
   Link2,
   RefreshCw,
   Search,
   Loader2,
+  FileText,
+  Copy,
+  Play,
+  Hash,
+  Type,
+  Calendar,
+  ToggleLeft,
+  Binary,
+  MoreHorizontal,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Badge } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Tooltip,
   TooltipContent,
@@ -30,6 +47,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import type { SchemaInfo, TableSchema, ColumnInfo } from '../types'
 
@@ -40,7 +64,53 @@ interface SchemaExplorerProps {
   onRefresh?: () => void
   onColumnClick?: (tableName: string, columnName: string) => void
   onTableClick?: (tableName: string) => void
+  /** Insert SELECT statement for table */
+  onInsertSelect?: (sql: string) => void
   className?: string
+}
+
+// Get icon for column data type
+function getTypeIcon(type: string) {
+  const lowerType = type.toLowerCase()
+  
+  if (lowerType.includes('int') || lowerType.includes('numeric') || lowerType.includes('decimal') || lowerType.includes('float') || lowerType.includes('double')) {
+    return Hash
+  }
+  if (lowerType.includes('char') || lowerType.includes('text') || lowerType.includes('string')) {
+    return Type
+  }
+  if (lowerType.includes('date') || lowerType.includes('time') || lowerType.includes('timestamp')) {
+    return Calendar
+  }
+  if (lowerType.includes('bool')) {
+    return ToggleLeft
+  }
+  if (lowerType.includes('binary') || lowerType.includes('blob') || lowerType.includes('byte')) {
+    return Binary
+  }
+  return FileText
+}
+
+// Get color class for column data type
+function getTypeColor(type: string): string {
+  const lowerType = type.toLowerCase()
+  
+  if (lowerType.includes('int') || lowerType.includes('numeric') || lowerType.includes('decimal') || lowerType.includes('float') || lowerType.includes('double')) {
+    return 'text-blue-500'
+  }
+  if (lowerType.includes('char') || lowerType.includes('text') || lowerType.includes('string')) {
+    return 'text-green-500'
+  }
+  if (lowerType.includes('date') || lowerType.includes('time') || lowerType.includes('timestamp')) {
+    return 'text-orange-500'
+  }
+  if (lowerType.includes('bool')) {
+    return 'text-purple-500'
+  }
+  if (lowerType.includes('binary') || lowerType.includes('blob') || lowerType.includes('byte')) {
+    return 'text-gray-500'
+  }
+  return 'text-muted-foreground'
 }
 
 export function SchemaExplorer({
@@ -50,23 +120,30 @@ export function SchemaExplorer({
   onRefresh,
   onColumnClick,
   onTableClick,
+  onInsertSelect,
   className,
 }: SchemaExplorerProps) {
   const [search, setSearch] = useState('')
-  const [expandedSchemas, setExpandedSchemas] = useState<Set<string>>(new Set(['public', 'default']))
+  const [selectedSchemaName, setSelectedSchemaName] = useState<string>('__all__')
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set())
 
-  const toggleSchema = (schemaName: string) => {
-    setExpandedSchemas((prev) => {
-      const next = new Set(prev)
-      if (next.has(schemaName)) {
-        next.delete(schemaName)
-      } else {
-        next.add(schemaName)
+  // Get list of schema names for selector
+  const schemaNames = useMemo(() => {
+    return schemas.map((s) => s.name)
+  }, [schemas])
+
+  // Auto-select first schema or 'public'/'default' if available
+  useMemo(() => {
+    if (schemas.length > 0 && selectedSchemaName === '__all__') {
+      const hasPublic = schemas.some(s => s.name === 'public')
+      const hasDefault = schemas.some(s => s.name === 'default')
+      if (hasPublic) {
+        setSelectedSchemaName('public')
+      } else if (hasDefault) {
+        setSelectedSchemaName('default')
       }
-      return next
-    })
-  }
+    }
+  }, [schemas, selectedSchemaName])
 
   const toggleTable = (tableKey: string) => {
     setExpandedTables((prev) => {
@@ -80,140 +157,195 @@ export function SchemaExplorer({
     })
   }
 
-  // Filter schemas and tables based on search
-  const filteredSchemas = schemas
-    .map((schema) => ({
-      ...schema,
-      tables: schema.tables.filter(
-        (table) =>
+  // Filter schemas and tables based on search and selected schema
+  const filteredTables = useMemo(() => {
+    let tables: Array<{ schema: string; table: TableSchema }> = []
+    
+    schemas.forEach((schema) => {
+      if (selectedSchemaName !== '__all__' && schema.name !== selectedSchemaName) {
+        return
+      }
+      
+      schema.tables.forEach((table) => {
+        const matchesSearch = 
+          search === '' ||
           table.name.toLowerCase().includes(search.toLowerCase()) ||
           table.columns.some((col) =>
             col.name.toLowerCase().includes(search.toLowerCase())
           )
-      ),
-    }))
-    .filter((schema) => schema.tables.length > 0)
+        
+        if (matchesSearch) {
+          tables.push({ schema: schema.name, table })
+        }
+      })
+    })
+    
+    // Sort tables alphabetically
+    tables.sort((a, b) => a.table.name.localeCompare(b.table.name))
+    
+    return tables
+  }, [schemas, selectedSchemaName, search])
+
+  // Handle bulk insert SELECT for all visible tables
+  const handleInsertSelectAll = () => {
+    if (!onInsertSelect) return
+    
+    const statements = filteredTables.map(({ schema, table }) => {
+      const fullTableName = `${schema}.${table.name}`
+      return `-- ${table.name}\nSELECT * FROM ${fullTableName} LIMIT 100;`
+    }).join('\n\n')
+    
+    onInsertSelect(statements)
+  }
 
   return (
-    <div className={cn('flex flex-col h-full bg-muted/30', className)}>
-      {/* Header */}
-      <div className="p-3 border-b">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="font-semibold text-sm">Schema Explorer</h3>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7"
-            onClick={onRefresh}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-          </Button>
+    <TooltipProvider>
+      <div className={cn('flex flex-col h-full bg-muted/30', className)}>
+        {/* Header */}
+        <div className="p-3 border-b space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-sm">Schema Explorer</h3>
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7"
+                    onClick={onRefresh}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Refresh schema</TooltipContent>
+              </Tooltip>
+              
+              {/* Bulk actions menu */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="icon" variant="ghost" className="h-7 w-7">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem 
+                    onClick={handleInsertSelectAll}
+                    disabled={filteredTables.length === 0}
+                  >
+                    <Play className="h-4 w-4 mr-2" />
+                    Insert SELECT for all tables
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => setExpandedTables(new Set(filteredTables.map(t => `${t.schema}.${t.table.name}`)))}
+                  >
+                    <ChevronDown className="h-4 w-4 mr-2" />
+                    Expand all
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setExpandedTables(new Set())}>
+                    <ChevronRight className="h-4 w-4 mr-2" />
+                    Collapse all
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+          
+          {/* Schema Selector */}
+          <Select value={selectedSchemaName} onValueChange={setSelectedSchemaName}>
+            <SelectTrigger className="h-8 text-xs">
+              <Database className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
+              <SelectValue placeholder="Select schema" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">
+                <span className="flex items-center gap-2">
+                  <span>All Schemas</span>
+                  <Badge variant="secondary" className="text-[10px] h-4">
+                    {schemas.reduce((acc, s) => acc + s.tables.length, 0)}
+                  </Badge>
+                </span>
+              </SelectItem>
+              {schemaNames.map((name) => {
+                const tableCount = schemas.find(s => s.name === name)?.tables.length || 0
+                return (
+                  <SelectItem key={name} value={name}>
+                    <span className="flex items-center gap-2">
+                      <span>{name}</span>
+                      <Badge variant="secondary" className="text-[10px] h-4">
+                        {tableCount}
+                      </Badge>
+                    </span>
+                  </SelectItem>
+                )
+              })}
+            </SelectContent>
+          </Select>
+          
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-2 top-2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search tables & columns..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8 h-8 text-xs"
+            />
+          </div>
         </div>
-        <div className="relative">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search tables..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-8 h-9"
-          />
+
+        {/* Tables List */}
+        <ScrollArea className="flex-1" type="always">
+          <div className="p-2 min-w-max">
+            {error ? (
+              <div className="text-center py-8 text-destructive text-sm">
+                <p className="font-medium">Failed to load schema</p>
+                <p className="text-xs mt-1 text-muted-foreground">{error}</p>
+              </div>
+            ) : isLoading && schemas.length === 0 ? (
+              <div className="flex items-center justify-center py-8 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                Loading schema...
+              </div>
+            ) : filteredTables.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground text-sm">
+                {search ? 'No matching tables found' : 'No tables available'}
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                {filteredTables.map(({ schema, table }) => {
+                  const tableKey = `${schema}.${table.name}`
+                  return (
+                    <TableNode
+                      key={tableKey}
+                      table={table}
+                      schemaName={schema}
+                      isExpanded={expandedTables.has(tableKey)}
+                      onToggle={() => toggleTable(tableKey)}
+                      onColumnClick={onColumnClick}
+                      onTableClick={onTableClick}
+                    />
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+        
+        {/* Footer with stats */}
+        <div className="p-2 border-t text-xs text-muted-foreground flex items-center justify-between">
+          <span>{filteredTables.length} tables</span>
+          <span>
+            {filteredTables.reduce((acc, t) => acc + t.table.columns.length, 0)} columns
+          </span>
         </div>
       </div>
-
-      {/* Schema Tree */}
-      <ScrollArea className="flex-1">
-        <div className="p-2">
-          {error ? (
-            <div className="text-center py-8 text-destructive text-sm">
-              <p className="font-medium">Failed to load schema</p>
-              <p className="text-xs mt-1 text-muted-foreground">{error}</p>
-            </div>
-          ) : isLoading && schemas.length === 0 ? (
-            <div className="flex items-center justify-center py-8 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin mr-2" />
-              Loading schema...
-            </div>
-          ) : filteredSchemas.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground text-sm">
-              {search ? 'No matching tables found' : 'No schemas available'}
-            </div>
-          ) : (
-            filteredSchemas.map((schema) => (
-              <SchemaNode
-                key={schema.name}
-                schema={schema}
-                isExpanded={expandedSchemas.has(schema.name)}
-                expandedTables={expandedTables}
-                onToggle={() => toggleSchema(schema.name)}
-                onTableToggle={toggleTable}
-                onColumnClick={onColumnClick}
-                onTableClick={onTableClick}
-              />
-            ))
-          )}
-        </div>
-      </ScrollArea>
-    </div>
-  )
-}
-
-interface SchemaNodeProps {
-  schema: SchemaInfo
-  isExpanded: boolean
-  expandedTables: Set<string>
-  onToggle: () => void
-  onTableToggle: (tableKey: string) => void
-  onColumnClick?: (tableName: string, columnName: string) => void
-  onTableClick?: (tableName: string) => void
-}
-
-function SchemaNode({
-  schema,
-  isExpanded,
-  expandedTables,
-  onToggle,
-  onTableToggle,
-  onColumnClick,
-  onTableClick,
-}: SchemaNodeProps) {
-  return (
-    <Collapsible open={isExpanded} onOpenChange={onToggle}>
-      <CollapsibleTrigger className="flex items-center gap-1 w-full px-2 py-1.5 text-sm rounded hover:bg-accent/50 group">
-        {isExpanded ? (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-        )}
-        <Database className="h-4 w-4 text-blue-500" />
-        <span className="font-medium">{schema.name}</span>
-        <span className="ml-auto text-xs text-muted-foreground opacity-0 group-hover:opacity-100">
-          {schema.tables.length}
-        </span>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="ml-4 border-l pl-2">
-          {schema.tables.map((table) => {
-            const tableKey = `${schema.name}.${table.name}`
-            return (
-              <TableNode
-                key={tableKey}
-                table={table}
-                schemaName={schema.name}
-                isExpanded={expandedTables.has(tableKey)}
-                onToggle={() => onTableToggle(tableKey)}
-                onColumnClick={onColumnClick}
-                onTableClick={onTableClick}
-              />
-            )
-          })}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+    </TooltipProvider>
   )
 }
 
@@ -236,43 +368,64 @@ function TableNode({
 }: TableNodeProps) {
   const fullTableName = `${schemaName}.${table.name}`
 
+  const handleCopyName = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    await navigator.clipboard.writeText(fullTableName)
+  }
+
   return (
     <Collapsible open={isExpanded} onOpenChange={onToggle}>
-      <div className="flex items-center group">
-        <CollapsibleTrigger className="flex items-center gap-1 flex-1 px-2 py-1 text-sm rounded hover:bg-accent/50">
+      <div className="flex items-center group rounded hover:bg-accent/50">
+        <CollapsibleTrigger className="flex items-center gap-1.5 flex-1 px-2 py-1.5 text-sm">
           {isExpanded ? (
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
           ) : (
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
           )}
-          <Table2 className="h-3.5 w-3.5 text-green-500" />
-          <span>{table.name}</span>
-          {table.rowCount !== undefined && (
-            <span className="ml-auto text-xs text-muted-foreground opacity-0 group-hover:opacity-100">
-              {table.rowCount.toLocaleString()}
-            </span>
-          )}
+          <Table2 className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
+          <span className="truncate font-medium">{table.name}</span>
+          <Badge variant="secondary" className="text-[10px] h-4 ml-auto">
+            {table.columns.length}
+          </Badge>
         </CollapsibleTrigger>
-        {onTableClick && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-6 w-6 opacity-0 group-hover:opacity-100"
-                  onClick={() => onTableClick(fullTableName)}
-                >
-                  <Columns className="h-3 w-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Insert SELECT *</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
+        
+        {/* Quick actions - always visible */}
+        <div className="flex items-center gap-0.5 pr-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6 text-blue-500 hover:text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/30"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onTableClick?.(fullTableName)
+                }}
+              >
+                <Play className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>SELECT * FROM {table.name}</TooltipContent>
+          </Tooltip>
+          
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={handleCopyName}
+              >
+                <Copy className="h-3 w-3" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Copy table name</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
+      
       <CollapsibleContent>
-        <div className="ml-4 border-l pl-2">
+        <div className="ml-4 pl-2 border-l border-border/50 space-y-0.5">
           {table.columns.map((column) => (
             <ColumnNode
               key={column.name}
@@ -294,40 +447,67 @@ interface ColumnNodeProps {
 }
 
 function ColumnNode({ column, tableName, onClick }: ColumnNodeProps) {
+  const TypeIcon = getTypeIcon(column.type)
+  const typeColor = getTypeColor(column.type)
+
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            className="flex items-center gap-1.5 w-full px-2 py-1 text-sm rounded hover:bg-accent/50 text-left group"
-            onClick={() => onClick?.(tableName, column.name)}
-          >
-            {column.isPrimaryKey ? (
-              <Key className="h-3 w-3 text-yellow-500 flex-shrink-0" />
-            ) : column.isForeignKey ? (
-              <Link2 className="h-3 w-3 text-purple-500 flex-shrink-0" />
-            ) : (
-              <div className="w-3 h-3 flex-shrink-0" />
-            )}
-            <span className="truncate">{column.name}</span>
-            <span className="ml-auto text-xs text-muted-foreground truncate max-w-[80px]">
-              {column.type}
-            </span>
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right" className="max-w-xs">
-          <div className="space-y-1">
-            <p>
-              <strong>{column.name}</strong>
-            </p>
-            <p className="text-xs">Type: {column.type}</p>
-            <p className="text-xs">Nullable: {column.nullable ? 'Yes' : 'No'}</p>
-            {column.isPrimaryKey && <p className="text-xs text-yellow-500">Primary Key</p>}
-            {column.isForeignKey && <p className="text-xs text-purple-500">Foreign Key</p>}
-            {column.comment && <p className="text-xs text-muted-foreground">{column.comment}</p>}
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className="flex items-center gap-1.5 w-full px-2 py-1 text-xs rounded hover:bg-accent/50 text-left group"
+          onClick={() => onClick?.(tableName, column.name)}
+        >
+          {/* Key indicator */}
+          {column.isPrimaryKey ? (
+            <Key className="h-3 w-3 text-yellow-500 flex-shrink-0" />
+          ) : column.isForeignKey ? (
+            <Link2 className="h-3 w-3 text-purple-500 flex-shrink-0" />
+          ) : (
+            <TypeIcon className={cn("h-3 w-3 flex-shrink-0", typeColor)} />
+          )}
+          
+          {/* Column name */}
+          <span className="truncate flex-1 font-mono">{column.name}</span>
+          
+          {/* Data type badge */}
+          <span className={cn(
+            "text-[10px] px-1.5 py-0.5 rounded bg-muted truncate max-w-[80px]",
+            typeColor
+          )}>
+            {column.type}
+          </span>
+          
+          {/* Nullable indicator */}
+          {column.nullable && (
+            <span className="text-[10px] text-muted-foreground">?</span>
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="max-w-xs">
+        <div className="space-y-1">
+          <p className="font-mono font-medium">{column.name}</p>
+          <div className="flex items-center gap-2 text-xs">
+            <span className={typeColor}>{column.type}</span>
+            {column.nullable && <span className="text-muted-foreground">• Nullable</span>}
           </div>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+          {column.isPrimaryKey && (
+            <p className="text-xs text-yellow-500 flex items-center gap-1">
+              <Key className="h-3 w-3" /> Primary Key
+            </p>
+          )}
+          {column.isForeignKey && (
+            <p className="text-xs text-purple-500 flex items-center gap-1">
+              <Link2 className="h-3 w-3" /> Foreign Key
+            </p>
+          )}
+          {column.comment && (
+            <p className="text-xs text-muted-foreground border-t pt-1 mt-1">
+              {column.comment}
+            </p>
+          )}
+          <p className="text-[10px] text-muted-foreground">Click to insert column name</p>
+        </div>
+      </TooltipContent>
+    </Tooltip>
   )
 }

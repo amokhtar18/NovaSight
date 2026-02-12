@@ -411,12 +411,30 @@ def get_clickhouse_client(
     
     Args:
         database: Explicit database name
-        tenant_id: Tenant ID (database will be tenant_{tenant_id})
+        tenant_id: Tenant ID (will resolve to tenant slug for database name)
     
     Returns:
         ClickHouseClient instance
     """
     if tenant_id and not database:
-        database = f"tenant_{tenant_id}"
+        # Resolve tenant slug from tenant ID
+        try:
+            from app.domains.tenants.domain.models import Tenant
+            from uuid import UUID
+            tenant = Tenant.query.filter(Tenant.id == UUID(str(tenant_id))).first()
+            if tenant and tenant.slug:
+                # Replace hyphens with underscores for ClickHouse database naming
+                slug = tenant.slug.replace('-', '_')
+                database = f"tenant_{slug}"
+                logger.debug(f"Resolved tenant {tenant_id} to database {database}")
+            else:
+                # Fallback to UUID-based naming (also replace hyphens)
+                clean_id = str(tenant_id).replace('-', '_')
+                database = f"tenant_{clean_id}"
+                logger.warning(f"Tenant {tenant_id} has no slug, using UUID for database name")
+        except Exception as e:
+            logger.warning(f"Could not resolve tenant slug: {e}")
+            clean_id = str(tenant_id).replace('-', '_')
+            database = f"tenant_{clean_id}"
     
     return ClickHouseClient(database=database)

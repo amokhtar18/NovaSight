@@ -33,17 +33,17 @@ import { SemanticModelsPage, ModelDetailPage } from '@/features/semantic'
 import { DashboardsListPage, DashboardBuilderPage } from '@/features/dashboards'
 import { QueryPage } from '@/features/query'
 import { SqlEditorPage } from '@/features/sql-editor'
+import { ChartsListPage, ChartBuilderPage, ChartViewPage } from '@/pages/charts'
 import { DocumentationPage } from '@/pages/documentation'
-import { InfrastructureConfigPage, AuditLogsPage, RolesManagementPage, DbtOperationsPage, BackupManagementPage } from '@/pages/admin'
+import { InfrastructureConfigPage, AuditLogsPage, RolesManagementPage, DbtOperationsPage, BackupManagementPage, TenantUserManagementPage } from '@/pages/admin'
 import { SettingsPage } from '@/pages/settings'
 import {
   PortalLayout,
   PortalOverviewPage,
   TenantManagementPage,
+  TenantDetailPage,
   UserManagementPage,
 } from '@/pages/portal'
-
-import { UsersPage as AdminUsersPage } from '@/features/admin'
 
 function App() {
   return (
@@ -123,15 +123,22 @@ function App() {
             <Route path="dashboards" element={<DashboardsListPage />} />
             <Route path="dashboards/:dashboardId" element={<DashboardBuilderPage />} />
             
+            {/* Charts */}
+            <Route path="charts" element={<ChartsListPage />} />
+            <Route path="charts/new" element={<ChartBuilderPage />} />
+            <Route path="charts/:chartId" element={<ChartViewPage />} />
+            <Route path="charts/:chartId/edit" element={<ChartBuilderPage />} />
+            
             {/* AI Query Interface */}
             <Route path="query" element={<QueryPage />} />
             
             {/* SQL Editor */}
             <Route path="sql" element={<SqlEditorPage />} />
+            <Route path="sql-editor" element={<SqlEditorPage />} />
             
             {/* Admin Pages */}
             <Route path="admin/infrastructure" element={<InfrastructureConfigPage />} />
-            <Route path="admin/users" element={<AdminUsersPage />} />
+            <Route path="admin/users" element={<TenantUserManagementPage />} />
             <Route path="admin/audit" element={<AuditLogsPage />} />
             <Route path="admin/roles" element={<RolesManagementPage />} />
             <Route path="admin/dbt" element={<DbtOperationsPage />} />
@@ -141,6 +148,7 @@ function App() {
             <Route path="portal" element={<PortalLayout />}>
               <Route index element={<PortalOverviewPage />} />
               <Route path="tenants" element={<TenantManagementPage />} />
+              <Route path="tenants/:tenantId" element={<TenantDetailPage />} />
               <Route path="users" element={<UserManagementPage />} />
               <Route path="infrastructure" element={<InfrastructureConfigPage />} />
             </Route>

@@ -219,6 +219,7 @@ def test_new_connection():
         username=data["username"],
         password=data["password"],
         ssl_mode=ssl_mode,
+        extra_params=data.get("extra_params"),
     )
 
     if not result["success"]:
@@ -245,12 +246,14 @@ def get_connection_schema(connection_id: str):
 
     schema_name = request.args.get("schema_name")
     include_columns = request.args.get("include_columns", "false").lower() == "true"
+    schemas_only = request.args.get("schemas_only", "false").lower() == "true"
 
     connection_service = ConnectionService(tenant_id)
     schema_info = connection_service.get_schema(
         connection_id=connection_id,
         schema_name=schema_name,
         include_columns=include_columns,
+        schemas_only=schemas_only,
     )
 
     if schema_info is None:
@@ -350,6 +353,106 @@ def get_tenant_clickhouse_info():
         "type": "clickhouse",
         "name": f"Tenant ClickHouse ({isolation.tenant_database})",
     })
+
+
+@api_v1_bp.route("/clickhouse/schema", methods=["GET"])
+@jwt_required()
+@require_tenant_context
+def get_tenant_clickhouse_schema():
+    """Get tenant's ClickHouse database schema (tables and columns)."""
+    from app.domains.analytics.infrastructure.clickhouse_client import get_clickhouse_client
+    from app.platform.tenant.isolation import TenantIsolationService
+    
+    identity = get_current_identity()
+    tenant_id = identity.tenant_id
+    
+    include_columns = request.args.get("include_columns", "false").lower() == "true"
+    
+    try:
+        isolation = TenantIsolationService(tenant_id)
+        db_name = isolation.tenant_database
+        
+        # Connect to ClickHouse (use default database to query system tables)
+        client = get_clickhouse_client(database=db_name)
+        
+        # Get tables from the tenant's database
+        tables_query = f"""
+            SELECT 
+                name,
+                engine,
+                total_rows,
+                total_bytes,
+                comment
+            FROM system.tables 
+            WHERE database = '{db_name}'
+            ORDER BY name
+        """
+        tables_result = client.execute(tables_query)
+        
+        tables = []
+        for row in tables_result.rows:
+            table_name = row[0]
+            table_info = {
+                "name": table_name,
+                "schema": db_name,
+                "engine": row[1],
+                "row_count": row[2] if row[2] else 0,
+                "size_bytes": row[3] if row[3] else 0,
+                "comment": row[4] if len(row) > 4 else None,
+                "table_type": "TABLE",
+            }
+            
+            # Get columns if requested
+            if include_columns:
+                columns_query = f"""
+                    SELECT 
+                        name,
+                        type,
+                        default_kind,
+                        comment,
+                        is_in_primary_key
+                    FROM system.columns 
+                    WHERE database = '{db_name}' AND table = '{table_name}'
+                    ORDER BY position
+                """
+                columns_result = client.execute(columns_query)
+                
+                columns = []
+                for col_row in columns_result.rows:
+                    columns.append({
+                        "name": col_row[0],
+                        "data_type": col_row[1],
+                        "nullable": "Nullable" in col_row[1],
+                        "default_kind": col_row[2] if col_row[2] else None,
+                        "comment": col_row[3] if len(col_row) > 3 else None,
+                        "primary_key": bool(col_row[4]) if len(col_row) > 4 else False,
+                    })
+                table_info["columns"] = columns
+            
+            tables.append(table_info)
+        
+        # Return in the same format as connection schema endpoint
+        return jsonify({
+            "schema": {
+                "schemas": [{
+                    "name": db_name,
+                    "tables": tables,
+                }],
+                "total_tables": len(tables),
+                "total_columns": sum(len(t.get("columns", [])) for t in tables),
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get ClickHouse schema: {e}")
+        return jsonify({
+            "schema": {
+                "schemas": [],
+                "total_tables": 0,
+                "total_columns": 0,
+                "error": str(e),
+            }
+        })
 
 
 @api_v1_bp.route("/clickhouse/query", methods=["POST"])

@@ -32,7 +32,7 @@ const createUserSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   email: z.string().email('Invalid email address'),
   password: z.string()
-    .min(12, 'Password must be at least 12 characters')
+    .min(8, 'Password must be at least 8 characters')
     .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
     .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
     .regex(/[0-9]/, 'Password must contain at least one number')
@@ -50,8 +50,8 @@ export function CreateUserDialog() {
   const { data: roles } = useQuery<Role[]>({
     queryKey: ['roles'],
     queryFn: async () => {
-      const response = await api.get<Role[]>('/roles')
-      return response.data
+      const response = await api.get<{ roles: Role[]; total: number }>('/roles')
+      return response.data.roles
     },
   })
 
@@ -77,7 +77,7 @@ export function CreateUserDialog() {
       setError(null)
     },
     onError: (err: any) => {
-      setError(err.response?.data?.message || 'Failed to create user')
+      setError(err.response?.data?.error?.message || err.response?.data?.message || 'Failed to create user')
     },
   })
 

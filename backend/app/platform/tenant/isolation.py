@@ -67,25 +67,44 @@ class TenantIsolationService:
             return tenant.slug
         return str(self.tenant_id)
     
+    @staticmethod
+    def _sanitize_slug(slug: str) -> str:
+        """Sanitize slug for use in database/schema names.
+        
+        This mirrors the sql_safe filter used in templates.
+        """
+        if not slug:
+            return "unnamed"
+        # Convert to lowercase
+        result = slug.lower()
+        # Replace hyphens and spaces with underscores
+        result = re.sub(r'[-\s]+', '_', result)
+        # Remove non-alphanumeric characters except underscores
+        result = re.sub(r'[^a-z0-9_]', '', result)
+        # Ensure starts with a letter
+        if result and not result[0].isalpha():
+            result = 't_' + result
+        return result or "unnamed"
+    
     @property
     def tenant_database(self) -> str:
         """Get the ClickHouse database name for this tenant."""
-        return f"tenant_{self.tenant_slug}"
+        return f"tenant_{self._sanitize_slug(self.tenant_slug)}"
     
     @property
     def tenant_schema(self) -> str:
         """Get the PostgreSQL schema name for this tenant."""
-        return f"tenant_{self.tenant_slug}"
+        return f"tenant_{self._sanitize_slug(self.tenant_slug)}"
     
     @property
     def tenant_dag_folder(self) -> str:
         """Get the Airflow DAGs folder for this tenant."""
-        return f"tenant_{self.tenant_slug}"
+        return f"tenant_{self._sanitize_slug(self.tenant_slug)}"
     
     @property
     def tenant_dbt_folder(self) -> str:
         """Get the dbt models folder for this tenant."""
-        return f"tenant_{self.tenant_slug}"
+        return f"tenant_{self._sanitize_slug(self.tenant_slug)}"
     
     # ------------------------------------------------------------------
     # Validation methods

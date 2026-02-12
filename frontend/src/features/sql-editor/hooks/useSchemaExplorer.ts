@@ -34,23 +34,42 @@ interface SchemaResponse {
 }
 
 export function useSchemaExplorer(datasourceId: string | undefined) {
-  const query = useQuery({
-    queryKey: ['schema', datasourceId],
+  // First, fetch only schema names (fast)
+  const schemasQuery = useQuery({
+    queryKey: ['schemas', datasourceId],
     queryFn: async () => {
       if (!datasourceId) throw new Error('No datasource selected')
       
-      // First fetch schemas and tables without columns (fast)
       const response = await api.get<SchemaResponse>(
         `/api/v1/connections/${datasourceId}/schema`,
-        { params: { include_columns: 'false' } }
+        { params: { schemas_only: 'true' } }
       )
       
-      // Handle error response
       if (response.data.schema.error) {
         throw new Error(response.data.schema.error)
       }
       
-      // Transform response to our types
+      return response.data.schema.schemas.map(s => s.name)
+    },
+    enabled: !!datasourceId,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // Then fetch tables with columns for all schemas
+  const tablesQuery = useQuery({
+    queryKey: ['schema-tables', datasourceId],
+    queryFn: async () => {
+      if (!datasourceId) throw new Error('No datasource selected')
+      
+      const response = await api.get<SchemaResponse>(
+        `/api/v1/connections/${datasourceId}/schema`,
+        { params: { include_columns: 'true' } }
+      )
+      
+      if (response.data.schema.error) {
+        throw new Error(response.data.schema.error)
+      }
+      
       const schemas: SchemaInfo[] = response.data.schema.schemas.map((schema) => ({
         name: schema.name,
         tables: schema.tables.map((table) => ({
@@ -71,16 +90,53 @@ export function useSchemaExplorer(datasourceId: string | undefined) {
       
       return schemas
     },
-    enabled: !!datasourceId,
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    enabled: !!datasourceId && schemasQuery.isSuccess,
+    staleTime: 5 * 60 * 1000,
   })
 
   return {
-    schemas: query.data || [],
-    isLoading: query.isLoading,
-    error: query.error?.message || null,
-    refetch: query.refetch,
+    schemas: tablesQuery.data || [],
+    schemaNames: schemasQuery.data || [],
+    isLoading: schemasQuery.isLoading || tablesQuery.isLoading,
+    isLoadingSchemas: schemasQuery.isLoading,
+    isLoadingTables: tablesQuery.isLoading,
+    error: schemasQuery.error?.message || tablesQuery.error?.message || null,
+    refetch: tablesQuery.refetch,
   }
+}
+
+/**
+ * Hook to fetch tables for a specific schema on demand
+ */
+export function useSchemaTablesLazy(datasourceId: string | undefined, schemaName: string | undefined) {
+  return useQuery({
+    queryKey: ['schema-tables', datasourceId, schemaName],
+    queryFn: async () => {
+      if (!datasourceId || !schemaName) throw new Error('Missing parameters')
+      
+      const response = await api.get<SchemaResponse>(
+        `/api/v1/connections/${datasourceId}/schema`,
+        { params: { schema_name: schemaName, include_columns: 'false' } }
+      )
+      
+      if (response.data.schema.error) {
+        throw new Error(response.data.schema.error)
+      }
+      
+      const schema = response.data.schema.schemas[0]
+      if (!schema) return []
+      
+      return schema.tables.map((table) => ({
+        name: table.name,
+        schema: table.schema,
+        columns: [],
+        rowCount: table.row_count,
+        comment: table.comment,
+      }))
+    },
+    enabled: !!datasourceId && !!schemaName,
+    staleTime: 5 * 60 * 1000,
+  })
 }
 
 export function useTablePreview(datasourceId: string | undefined, tableName: string | undefined) {

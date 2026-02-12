@@ -35,6 +35,9 @@ const connectionSchema = z.object({
   username: z.string().min(1, 'Username is required'),
   password: z.string().min(1, 'Password is required'),
   ssl_enabled: z.boolean().default(true),
+  // Oracle-specific options
+  service_name: z.string().optional(),
+  thick_mode: z.boolean().default(false),
 })
 
 type ConnectionFormData = z.infer<typeof connectionSchema>
@@ -59,6 +62,8 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
     defaultValues: {
       ssl_enabled: true,
       port: 5432,
+      thick_mode: false,
+      service_name: '',
     },
   })
 
@@ -80,11 +85,29 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
     setCurrentStep(1)
   }
 
+  // Build extra_params for database-specific options
+  const buildExtraParams = (data: ConnectionFormData) => {
+    const extra: Record<string, unknown> = {}
+    
+    // Oracle-specific options
+    if (data.db_type === 'oracle') {
+      if (data.thick_mode) extra.thick_mode = true
+      if (data.service_name) extra.service_name = data.service_name
+    }
+    
+    return Object.keys(extra).length > 0 ? extra : undefined
+  }
+
   const handleConnectionSubmit = async (data: ConnectionFormData) => {
     setTestResult(null)
     setCurrentStep(2) // Move to test step to show loading/result
     try {
-      const result = await testConnection.mutateAsync(data)
+      // Include extra_params when testing connection
+      const testData = {
+        ...data,
+        extra_params: buildExtraParams(data),
+      }
+      const result = await testConnection.mutateAsync(testData)
       setTestResult(result)
       if (result.success) {
         setCurrentStep(3)
@@ -100,11 +123,15 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
   const handleFinish = async () => {
     const data = form.getValues()
     try {
+      // Merge Oracle options with selected tables
+      const extraParams: Record<string, unknown> = {
+        ...buildExtraParams(data),
+        ...(selectedTables.size > 0 ? { selected_tables: Array.from(selectedTables) } : {}),
+      }
+      
       await createDataSource.mutateAsync({
         ...data,
-        extra_params: selectedTables.size > 0
-          ? { selected_tables: Array.from(selectedTables) }
-          : undefined,
+        extra_params: Object.keys(extraParams).length > 0 ? extraParams : undefined,
       })
       handleClose()
       onSuccess?.()
