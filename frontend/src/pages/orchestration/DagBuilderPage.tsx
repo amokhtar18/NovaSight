@@ -247,16 +247,37 @@ export function DagBuilderPage() {
         .map((edge) => edge.source)
 
       const config = taskConfigs[node.id] || {}
+      
+      // Generate meaningful task_id from app_name, target_table, or fallback to node.id
+      let taskId = node.id
+      if (config.app_name) {
+        // Use app_name (from PySpark app) as task ID
+        const appNameSlug = (config.app_name as string).toLowerCase().replace(/\s+/g, '_')
+        taskId = `${appNameSlug}_task`
+      } else if (config.pyspark_app_id) {
+        // Try to get table name from selected PySpark app
+        const selectedApp = pysparkApps.find(app => app.id === config.pyspark_app_id)
+        if (selectedApp?.target_table) {
+          taskId = `${selectedApp.target_table.toLowerCase().replace(/\s+/g, '_')}_task`
+        }
+      }
 
       return {
-        task_id: node.id,
+        task_id: taskId,
         task_type: node.data.taskType,
         config: config,
         timeout_minutes: (config.timeout_minutes as number) || 60,
         retries: (config.retries as number) || 1,
         retry_delay_minutes: 5,
         trigger_rule: 'all_success',
-        depends_on: dependencies,
+        depends_on: dependencies.map(depId => {
+          // Also convert dependency IDs to meaningful names
+          const depConfig = taskConfigs[depId] || {}
+          if (depConfig.app_name) {
+            return `${(depConfig.app_name as string).toLowerCase().replace(/\s+/g, '_')}_task`
+          }
+          return depId
+        }),
         position_x: node.position.x,
         position_y: node.position.y,
       }
@@ -390,12 +411,6 @@ SPARK_MASTER_CONTAINER = os.environ.get('SPARK_MASTER_CONTAINER', 'novasight-spa
 # Check if native Spark is available (preferred)
 SPARK_NATIVE_AVAILABLE = os.path.exists(f'{SPARK_HOME}/bin/spark-submit')
 
-# JDBC JARs for database connectivity
-JDBC_JARS = ','.join([
-    f'{SPARK_HOME}/jars/custom/postgresql-42.7.4.jar',
-    f'{SPARK_HOME}/jars/custom/clickhouse-jdbc-0.6.3.jar',
-])
-
 default_args = {
     'owner': '${ownerName}',
     'depends_on_past': False,
@@ -454,7 +469,6 @@ ${indent}    tasks['${task.task_id}'] = SparkSubmitOperator(
 ${indent}        task_id='${task.task_id}',
 ${indent}        application='${appPath}',
 ${indent}        conn_id='spark_default',
-${indent}        jars=JDBC_JARS,
 ${indent}        executor_memory='${executorMemory}',
 ${indent}        executor_cores=${executorCores},
 ${indent}        driver_memory='${driverMemory}',

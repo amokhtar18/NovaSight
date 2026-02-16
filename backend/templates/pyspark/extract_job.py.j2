@@ -81,6 +81,21 @@ class ExtractJob:
         # Job configuration
         self.write_mode = "{{ write_mode }}"
         self.batch_size = {{ options.batch_size | default(10000, true) }}
+        
+        # Column type mappings: source column -> ClickHouse type
+        # Generated from source database type: {{ connection.db_type }}
+        self.column_type_mapping = {
+{% for col in columns %}
+            "{{ col.name }}": "{{ col.data_type | to_clickhouse_type(connection.db_type) }}",
+{% endfor %}
+        }
+        
+        # Metadata column types for ClickHouse
+        self.metadata_columns = {
+            "_novasight_app_id": "String",
+            "_novasight_extracted_at": "DateTime64(3)",
+            "_novasight_tenant_id": "String",
+        }
     
     def _validate_target_database(self):
         """Validate that target database belongs to this tenant."""
@@ -119,6 +134,84 @@ class ExtractJob:
             "sqlserver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
         }
         return drivers.get(self.source_config["db_type"], "org.postgresql.Driver")
+    
+    def get_clickhouse_create_table_ddl(self) -> str:
+        """
+        Generate CREATE TABLE DDL for ClickHouse with proper type mappings.
+        
+        Returns:
+            CREATE TABLE DDL string
+        """
+        target_db = self.target_config["database"]
+        target_table = self.target_config["table"]
+        engine = self.target_config["engine"]
+        
+        # Build column definitions with mapped ClickHouse types
+        column_defs = []
+        for col_name, ch_type in self.column_type_mapping.items():
+            column_defs.append(f"    `{col_name}` Nullable({ch_type})")
+        
+        # Add metadata columns (not nullable)
+        for col_name, ch_type in self.metadata_columns.items():
+            column_defs.append(f"    `{col_name}` {ch_type}")
+        
+        columns_str = ",\n".join(column_defs)
+        
+{% if target.order_by and target.order_by|length > 0 %}
+        order_by_cols = ", ".join(["`{{ col }}`" for col in [{% for col in target.order_by %}"{{ col }}"{{ ", " if not loop.last }}{% endfor %}]])
+        order_by_clause = f"ORDER BY ({order_by_cols})"
+{% else %}
+        order_by_clause = "ORDER BY tuple()"
+{% endif %}
+        
+{% if target.partition_by %}
+        partition_clause = "PARTITION BY {{ target.partition_by }}"
+{% else %}
+        partition_clause = ""
+{% endif %}
+        
+        ddl = f"""
+CREATE TABLE IF NOT EXISTS `{target_db}`.`{target_table}`
+(
+{columns_str}
+)
+ENGINE = {engine}
+{order_by_clause}
+{partition_clause}
+""".strip()
+        
+        return ddl
+    
+    def ensure_target_table(self):
+        """
+        Ensure the target ClickHouse table exists with correct schema.
+        
+        Creates the table if it doesn't exist, using the column type mappings
+        derived from the source database types.
+        """
+        import clickhouse_connect
+        
+        target_url = os.getenv("CLICKHOUSE_HOST", "localhost")
+        target_port = int(os.getenv("CLICKHOUSE_PORT", "8123"))
+        target_user = os.getenv("CLICKHOUSE_USER", "default")
+        target_password = os.getenv("CLICKHOUSE_PASSWORD", "")
+        
+        try:
+            client = clickhouse_connect.get_client(
+                host=target_url,
+                port=target_port,
+                username=target_user,
+                password=target_password,
+            )
+            
+            ddl = self.get_clickhouse_create_table_ddl()
+            logger.info(f"Creating target table if not exists:\n{ddl}")
+            
+            client.command(ddl)
+            logger.info(f"Target table ensured: {self.target_config['database']}.{self.target_config['table']}")
+            
+        except Exception as e:
+            logger.warning(f"Could not ensure target table via DDL (will rely on JDBC auto-create): {e}")
     
     def read_source(self):
         """Read data from source database."""
@@ -239,6 +332,9 @@ class ExtractJob:
         start_time = datetime.now()
         
         try:
+            # Ensure target table exists with correct schema
+            self.ensure_target_table()
+            
             # Read source data
             df = self.read_source()
             

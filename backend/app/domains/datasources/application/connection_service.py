@@ -331,7 +331,14 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
             )
 
             with connector:
-                schemas = connector.get_schemas()
+                all_schemas = connector.get_schemas()
+                
+                # Filter schemas by allowed_schemas from extra_params if configured
+                allowed_schemas = (connection.extra_params or {}).get("allowed_schemas")
+                if allowed_schemas and isinstance(allowed_schemas, list) and len(allowed_schemas) > 0:
+                    schemas = [s for s in all_schemas if s in allowed_schemas]
+                else:
+                    schemas = all_schemas
                 
                 # Fast mode: only return schema names without fetching tables
                 if schemas_only:
@@ -361,7 +368,17 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
                         continue
 
                     logger.debug(f"Fetching tables for schema: {schema}")
-                    tables = connector.get_tables(schema)
+                    
+                    # Use optimized batch method if columns are requested
+                    if include_columns:
+                        try:
+                            tables = connector.get_tables_with_columns(schema)
+                        except Exception as batch_err:
+                            logger.warning(f"Batch column fetch failed for {schema}, falling back to individual queries: {batch_err}")
+                            tables = connector.get_tables(schema)
+                    else:
+                        tables = connector.get_tables(schema)
+                    
                     tables_dict = []
                     for table in tables:
                         table_dict = {
@@ -372,14 +389,18 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
                             "table_type": table.table_type,
                         }
 
-                        # Fetch columns separately if requested (get_tables returns empty columns)
+                        # Add columns if they were fetched (from batch method)
                         if include_columns:
-                            try:
-                                table_with_cols = connector.get_table_schema(schema, table.name)
-                                columns = table_with_cols.columns
-                            except Exception as col_err:
-                                logger.warning(f"Failed to get columns for {schema}.{table.name}: {col_err}")
-                                columns = []
+                            columns = table.columns
+                            
+                            # Fallback to individual query if batch didn't get columns
+                            if not columns:
+                                try:
+                                    table_with_cols = connector.get_table_schema(schema, table.name)
+                                    columns = table_with_cols.columns
+                                except Exception as col_err:
+                                    logger.warning(f"Failed to get columns for {schema}.{table.name}: {col_err}")
+                                    columns = []
 
                             table_dict["columns"] = [
                                 {
@@ -403,10 +424,11 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
                     tables_by_schema[schema] = tables_dict
 
                 # Return in the format expected by frontend
+                # Filter out schemas with no tables to reduce payload
                 schema_list = [
                     {"name": schema_name, "tables": tables_by_schema.get(schema_name, [])}
                     for schema_name in target_schemas
-                    if schema_name in schemas
+                    if schema_name in schemas and len(tables_by_schema.get(schema_name, [])) > 0
                 ]
 
                 return {

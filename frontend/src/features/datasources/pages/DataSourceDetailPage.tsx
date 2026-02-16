@@ -220,8 +220,12 @@ export function DataSourceDetailPage() {
                   <dd className="font-mono text-sm">{datasource.database}</dd>
                 </div>
                 <div>
-                  <dt className="text-sm font-medium text-muted-foreground mb-1">Schema</dt>
-                  <dd className="font-mono text-sm">{datasource.schema_name || 'All schemas'}</dd>
+                  <dt className="text-sm font-medium text-muted-foreground mb-1">Allowed Schemas</dt>
+                  <dd className="font-mono text-sm">
+                    {datasource.extra_params?.allowed_schemas?.length > 0
+                      ? (datasource.extra_params.allowed_schemas as string[]).join(', ')
+                      : datasource.schema_name || 'All schemas'}
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-sm font-medium text-muted-foreground mb-1">Username</dt>

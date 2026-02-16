@@ -4,7 +4,7 @@
  * With schema selector, datatype display, and bulk actions
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   ChevronRight,
   ChevronDown,
@@ -63,7 +63,6 @@ interface SchemaExplorerProps {
   error?: string | null
   onRefresh?: () => void
   onColumnClick?: (tableName: string, columnName: string) => void
-  onTableClick?: (tableName: string) => void
   /** Insert SELECT statement for table */
   onInsertSelect?: (sql: string) => void
   className?: string
@@ -119,7 +118,6 @@ export function SchemaExplorer({
   error,
   onRefresh,
   onColumnClick,
-  onTableClick,
   onInsertSelect,
   className,
 }: SchemaExplorerProps) {
@@ -140,7 +138,7 @@ export function SchemaExplorer({
   }, [schemas])
 
   // Auto-select first schema or 'public'/'default' if available
-  useMemo(() => {
+  useEffect(() => {
     if (nonEmptySchemas.length > 0 && selectedSchemaName === '__all__') {
       const hasPublic = nonEmptySchemas.some(s => s.name === 'public')
       const hasDefault = nonEmptySchemas.some(s => s.name === 'default')
@@ -148,6 +146,9 @@ export function SchemaExplorer({
         setSelectedSchemaName('public')
       } else if (hasDefault) {
         setSelectedSchemaName('default')
+      } else if (nonEmptySchemas.length === 1) {
+        // Auto-select the only available schema
+        setSelectedSchemaName(nonEmptySchemas[0].name)
       }
     }
   }, [nonEmptySchemas, selectedSchemaName])
@@ -335,7 +336,7 @@ export function SchemaExplorer({
                       isExpanded={expandedTables.has(tableKey)}
                       onToggle={() => toggleTable(tableKey)}
                       onColumnClick={onColumnClick}
-                      onTableClick={onTableClick}
+                      onInsertSelect={onInsertSelect}
                     />
                   )
                 })}
@@ -362,7 +363,7 @@ interface TableNodeProps {
   isExpanded: boolean
   onToggle: () => void
   onColumnClick?: (tableName: string, columnName: string) => void
-  onTableClick?: (tableName: string) => void
+  onInsertSelect?: (sql: string) => void
 }
 
 function TableNode({
@@ -371,9 +372,15 @@ function TableNode({
   isExpanded,
   onToggle,
   onColumnClick,
-  onTableClick,
+  onInsertSelect,
 }: TableNodeProps) {
   const fullTableName = `${schemaName}.${table.name}`
+
+  const handleInsertSelect = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const sql = `SELECT * FROM ${fullTableName} LIMIT 100;`
+    onInsertSelect?.(sql)
+  }
 
   const handleCopyName = async (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -391,56 +398,87 @@ function TableNode({
           )}
           <Table2 className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
           <span className="truncate font-medium">{table.name}</span>
+          {table.rowCount !== undefined && table.rowCount > 0 && (
+            <span className="text-[10px] text-muted-foreground ml-1">
+              ({table.rowCount.toLocaleString()} rows)
+            </span>
+          )}
           <Badge variant="secondary" className="text-[10px] h-4 ml-auto">
-            {table.columns.length}
+            {table.columns.length} cols
           </Badge>
         </CollapsibleTrigger>
         
-        {/* Quick actions - always visible */}
-        <div className="flex items-center gap-0.5 pr-1">
+        {/* Quick actions - always visible for all connections */}
+        <div className="flex items-center gap-0.5 pr-2 flex-shrink-0">
+          {/* Insert SELECT button - always visible regardless of connection type */}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 size="icon"
                 variant="ghost"
                 className="h-6 w-6 text-blue-500 hover:text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/30"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onTableClick?.(fullTableName)
-                }}
+                onClick={handleInsertSelect}
               >
                 <Play className="h-3.5 w-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>SELECT * FROM {table.name}</TooltipContent>
+            <TooltipContent side="left">Insert SELECT * FROM {table.name}</TooltipContent>
           </Tooltip>
           
-          <Tooltip>
-            <TooltipTrigger asChild>
+          {/* More actions dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button
                 size="icon"
                 variant="ghost"
                 className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={handleCopyName}
+                onClick={(e) => e.stopPropagation()}
               >
-                <Copy className="h-3 w-3" />
+                <MoreHorizontal className="h-3.5 w-3.5" />
               </Button>
-            </TooltipTrigger>
-            <TooltipContent>Copy table name</TooltipContent>
-          </Tooltip>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+              <DropdownMenuItem onClick={handleInsertSelect}>
+                <Play className="h-4 w-4 mr-2" />
+                Insert SELECT *
+              </DropdownMenuItem>
+              {table.columns.length > 0 && (
+                <DropdownMenuItem onClick={(e) => {
+                  e.stopPropagation()
+                  const cols = table.columns.map(c => c.name).join(',\n  ')
+                  const sql = `SELECT\n  ${cols}\nFROM ${fullTableName}\nLIMIT 100;`
+                  onInsertSelect?.(sql)
+                }}>
+                  <FileText className="h-4 w-4 mr-2" />
+                  Insert SELECT with columns
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleCopyName}>
+                <Copy className="h-4 w-4 mr-2" />
+                Copy table name
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
       
       <CollapsibleContent>
         <div className="ml-4 pl-2 border-l border-border/50 space-y-0.5">
-          {table.columns.map((column) => (
-            <ColumnNode
-              key={column.name}
-              column={column}
-              tableName={fullTableName}
-              onClick={onColumnClick}
-            />
-          ))}
+          {table.columns.length === 0 ? (
+            <div className="text-xs text-muted-foreground py-2 px-2 italic">
+              No columns available
+            </div>
+          ) : (
+            table.columns.map((column) => (
+              <ColumnNode
+                key={column.name}
+                column={column}
+                tableName={fullTableName}
+                onClick={onColumnClick}
+              />
+            ))
+          )}
         </div>
       </CollapsibleContent>
     </Collapsible>

@@ -2,19 +2,21 @@
 # =============================
 # Custom Airflow image with NovaSight dependencies and Spark binaries
 # Updated: February 2026 - Airflow 3.1.7 (latest stable)
-# Includes: Apache Spark 3.5.4 for native SparkSubmitOperator support
+# Uses pre-downloaded Spark binaries from ./infrastructure/spark for faster builds
+#
+# IMPORTANT: Build context must be project root, not docker/airflow
+# Run: ./infrastructure/spark/download-spark.ps1 before building
 
 FROM apache/airflow:3.1.7-python3.12
 
 USER root
 
-# Install system dependencies including Docker CLI (fallback) and wget for Spark download
+# Install system dependencies including Docker CLI
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     default-jdk \
     curl \
-    wget \
     procps \
     docker.io \
     && rm -rf /var/lib/apt/lists/*
@@ -24,32 +26,28 @@ ENV JAVA_HOME=/usr/lib/jvm/default-java
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 # ============================================
-# Install Apache Spark 3.5.4
+# Install Apache Spark 3.5.4 (from project dir)
 # ============================================
 ENV SPARK_VERSION=3.5.4
-ENV HADOOP_VERSION=3
 ENV SPARK_HOME=/opt/spark
 ENV PATH="${SPARK_HOME}/bin:${SPARK_HOME}/sbin:${PATH}"
 
-# Download and install Spark
-RUN mkdir -p ${SPARK_HOME} && \
-    wget -q "https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz" \
-    -O /tmp/spark.tgz && \
-    tar -xzf /tmp/spark.tgz -C ${SPARK_HOME} --strip-components=1 && \
-    rm /tmp/spark.tgz && \
-    chown -R airflow:root ${SPARK_HOME}
+# Create Spark directories
+RUN mkdir -p ${SPARK_HOME}/bin \
+    ${SPARK_HOME}/sbin \
+    ${SPARK_HOME}/jars \
+    ${SPARK_HOME}/conf \
+    ${SPARK_HOME}/python \
+    /opt/spark/jobs && \
+    chown -R airflow:root ${SPARK_HOME} /opt/spark/jobs
 
-# Create directories for custom JARs and jobs
-RUN mkdir -p ${SPARK_HOME}/jars/custom && \
-    mkdir -p /opt/spark/jobs && \
-    chown -R airflow:root /opt/spark
-
-# Download JDBC drivers for PostgreSQL and ClickHouse
-RUN wget -q "https://jdbc.postgresql.org/download/postgresql-42.7.4.jar" \
-    -O ${SPARK_HOME}/jars/custom/postgresql-42.7.4.jar && \
-    wget -q "https://github.com/ClickHouse/clickhouse-java/releases/download/v0.6.3/clickhouse-jdbc-0.6.3-shaded.jar" \
-    -O ${SPARK_HOME}/jars/custom/clickhouse-jdbc-0.6.3.jar && \
-    chown -R airflow:root ${SPARK_HOME}/jars/custom
+# Copy pre-downloaded Spark binaries from project directory
+# These are downloaded via ./infrastructure/spark/download-spark.ps1
+COPY --chown=airflow:root infrastructure/spark/bin/ ${SPARK_HOME}/bin/
+COPY --chown=airflow:root infrastructure/spark/sbin/ ${SPARK_HOME}/sbin/
+COPY --chown=airflow:root infrastructure/spark/conf/ ${SPARK_HOME}/conf/
+COPY --chown=airflow:root infrastructure/spark/jars/ ${SPARK_HOME}/jars/
+COPY --chown=airflow:root infrastructure/spark/python/ ${SPARK_HOME}/python/
 
 # Add airflow user to docker group for docker exec fallback
 RUN usermod -aG docker airflow || true
@@ -82,11 +80,11 @@ RUN pip install --no-cache-dir \
     dbt-clickhouse
 
 # Copy custom plugins and DAGs
-COPY --chown=airflow:root plugins/ /opt/airflow/plugins/
-COPY --chown=airflow:root dags/ /opt/airflow/dags/
+COPY --chown=airflow:root docker/airflow/plugins/ /opt/airflow/plugins/
+COPY --chown=airflow:root docker/airflow/dags/ /opt/airflow/dags/
 
 # Copy init script for creating connections
-COPY --chown=airflow:root scripts/init-connections.sh /opt/airflow/scripts/init-connections.sh
+COPY --chown=airflow:root docker/airflow/scripts/init-connections.sh /opt/airflow/scripts/init-connections.sh
 
 # Set Airflow home
 ENV AIRFLOW_HOME=/opt/airflow

@@ -1,0 +1,82 @@
+# NovaSight Airflow Dockerfile (Optimized)
+# =========================================
+# Custom Airflow image with NovaSight dependencies
+# Uses shared Spark binaries mounted as volumes for faster builds
+# 
+# IMPORTANT: Run ./infrastructure/spark/download-spark.ps1 (or .sh) first
+# to download Spark binaries before building this image.
+# 
+# Updated: February 2026 - Airflow 3.1.7 (latest stable)
+
+FROM apache/airflow:3.1.7-python3.12
+
+USER root
+
+# Install system dependencies including Docker CLI
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    default-jdk \
+    curl \
+    procps \
+    docker.io \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set JAVA_HOME for Spark operations
+ENV JAVA_HOME=/usr/lib/jvm/default-java
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+# Spark environment variables
+# Spark binaries are mounted at runtime from ./infrastructure/spark
+ENV SPARK_VERSION=3.5.4
+ENV SPARK_HOME=/opt/spark
+ENV PATH="${SPARK_HOME}/bin:${SPARK_HOME}/sbin:${PATH}"
+
+# Create directories for Spark (contents mounted as volumes)
+RUN mkdir -p ${SPARK_HOME}/bin \
+    ${SPARK_HOME}/sbin \
+    ${SPARK_HOME}/jars \
+    ${SPARK_HOME}/conf \
+    ${SPARK_HOME}/python \
+    /opt/spark/jobs && \
+    chown -R airflow:root ${SPARK_HOME} /opt/spark/jobs
+
+# Add airflow user to docker group for docker exec fallback
+RUN usermod -aG docker airflow || true
+
+USER airflow
+
+# Upgrade pip first
+RUN pip install --no-cache-dir --upgrade pip
+
+# Install Python dependencies for DAGs including Spark provider
+RUN pip install --no-cache-dir \
+    apache-airflow-providers-apache-spark \
+    apache-airflow-providers-postgres \
+    apache-airflow-providers-http \
+    apache-airflow-providers-smtp \
+    apache-airflow-providers-slack \
+    apache-airflow-providers-common-sql \
+    pyspark==3.5.4 \
+    clickhouse-connect \
+    pandas \
+    numpy \
+    httpx \
+    structlog \
+    pendulum
+
+# Install dbt packages separately
+RUN pip install --no-cache-dir \
+    dbt-core \
+    dbt-postgres \
+    dbt-clickhouse
+
+# Copy custom plugins and DAGs
+COPY --chown=airflow:root plugins/ /opt/airflow/plugins/
+COPY --chown=airflow:root dags/ /opt/airflow/dags/
+
+# Copy init script for creating connections
+COPY --chown=airflow:root scripts/init-connections.sh /opt/airflow/scripts/init-connections.sh
+
+# Set Airflow home
+ENV AIRFLOW_HOME=/opt/airflow

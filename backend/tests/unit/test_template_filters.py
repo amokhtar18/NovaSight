@@ -15,6 +15,8 @@ from app.services.template_engine.filters import (
     sql_type_mapping,
     quote_identifier,
     indent_lines,
+    to_clickhouse_type,
+    clickhouse_column_def,
 )
 
 
@@ -201,3 +203,91 @@ class TestIndentLines:
 
     def test_single_line(self):
         assert indent_lines("single", spaces=4) == "single"
+
+
+class TestToClickhouseType:
+    """Tests for to_clickhouse_type filter."""
+
+    def test_postgresql_varchar(self):
+        assert to_clickhouse_type("varchar(255)", "postgresql") == "String"
+
+    def test_postgresql_integer(self):
+        assert to_clickhouse_type("integer", "postgresql") == "Int32"
+
+    def test_postgresql_bigint(self):
+        assert to_clickhouse_type("bigint", "postgresql") == "Int64"
+
+    def test_postgresql_numeric(self):
+        assert to_clickhouse_type("numeric(18,4)", "postgresql") == "Decimal64(4)"
+
+    def test_postgresql_timestamp(self):
+        assert to_clickhouse_type("timestamp", "postgresql") == "DateTime"
+
+    def test_postgresql_boolean(self):
+        assert to_clickhouse_type("boolean", "postgresql") == "UInt8"
+
+    def test_mysql_int(self):
+        assert to_clickhouse_type("int", "mysql") == "Int32"
+
+    def test_mysql_datetime(self):
+        assert to_clickhouse_type("datetime", "mysql") == "DateTime"
+
+    def test_oracle_varchar2(self):
+        assert to_clickhouse_type("varchar2(100)", "oracle") == "String"
+
+    def test_oracle_number(self):
+        assert to_clickhouse_type("number(10,2)", "oracle") == "Decimal64(2)"
+
+    def test_sqlserver_nvarchar(self):
+        assert to_clickhouse_type("nvarchar(100)", "sqlserver") == "String"
+
+    def test_sqlserver_uniqueidentifier(self):
+        assert to_clickhouse_type("uniqueidentifier", "sqlserver") == "UUID"
+
+    def test_unknown_type_defaults_to_string(self):
+        assert to_clickhouse_type("custom_type", "postgresql") == "String"
+
+    def test_default_database(self):
+        # Should default to postgresql
+        assert to_clickhouse_type("varchar") == "String"
+
+
+class TestClickhouseColumnDef:
+    """Tests for clickhouse_column_def filter."""
+
+    def test_nullable_column(self):
+        result = clickhouse_column_def(
+            column_name="email",
+            source_type="varchar(255)",
+            database="postgresql",
+            nullable=True,
+        )
+        assert result == "`email` Nullable(String)"
+
+    def test_not_nullable_column(self):
+        result = clickhouse_column_def(
+            column_name="id",
+            source_type="integer",
+            database="postgresql",
+            nullable=False,
+        )
+        assert result == "`id` Int32"
+
+    def test_column_with_default(self):
+        result = clickhouse_column_def(
+            column_name="created_at",
+            source_type="timestamp",
+            database="postgresql",
+            nullable=False,
+            default_value="now()",
+        )
+        assert result == "`created_at` DateTime DEFAULT now()"
+
+    def test_mysql_column(self):
+        result = clickhouse_column_def(
+            column_name="count",
+            source_type="bigint",
+            database="mysql",
+            nullable=False,
+        )
+        assert result == "`count` Int64"

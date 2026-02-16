@@ -25,12 +25,14 @@ from jinja2 import (
 from pydantic import BaseModel, ValidationError
 
 from app.services.template_engine.filters import (
+    clickhouse_column_def,
     indent_lines,
     quote_identifier,
     sql_identifier_safe,
     sql_string_escape,
     sql_type_mapping,
     to_camel_case,
+    to_clickhouse_type,
     to_pascal_case,
     to_snake_case,
 )
@@ -174,6 +176,9 @@ class TemplateEngine:
         self.env.filters['sql_type'] = sql_type_mapping
         self.env.filters['quote_id'] = quote_identifier
         self.env.filters['indent_lines'] = indent_lines
+        # ClickHouse type mapping filters
+        self.env.filters['to_clickhouse_type'] = to_clickhouse_type
+        self.env.filters['clickhouse_column_def'] = clickhouse_column_def
     
     def _register_tests(self) -> None:
         """Register custom Jinja2 tests."""

@@ -1,14 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Database, AlertCircle, RefreshCw, CheckCircle2, XCircle } from 'lucide-react'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { dataSourceService } from '@/services/dataSourceService'
 import type { ConnectionTestResult } from '@/types/datasource'
 
@@ -24,15 +19,15 @@ interface SchemaSelectorProps {
     extra_params?: Record<string, unknown>
   }
   testResult: ConnectionTestResult | null
-  selectedSchema: string | null
-  onSchemaChange: (schema: string | null) => void
+  selectedSchemas: string[]
+  onSchemasChange: (schemas: string[]) => void
 }
 
 export function SchemaSelector({
   connectionData,
   testResult,
-  selectedSchema,
-  onSchemaChange,
+  selectedSchemas,
+  onSchemasChange,
 }: SchemaSelectorProps) {
   const [schemas, setSchemas] = useState<string[]>([])
   const [refreshing, setRefreshing] = useState(false)
@@ -42,14 +37,18 @@ export function SchemaSelector({
   useEffect(() => {
     if (testResult?.success && testResult.details?.schemas) {
       setSchemas(testResult.details.schemas)
-      // Auto-select if only one schema or if 'public' exists
-      if (testResult.details.schemas.length === 1) {
-        onSchemaChange(testResult.details.schemas[0])
-      } else if (testResult.details.schemas.includes('public') && !selectedSchema) {
-        onSchemaChange('public')
+      // Auto-select 'public' or 'default' if exists and no schemas selected yet
+      if (selectedSchemas.length === 0) {
+        if (testResult.details.schemas.includes('public')) {
+          onSchemasChange(['public'])
+        } else if (testResult.details.schemas.includes('default')) {
+          onSchemasChange(['default'])
+        } else if (testResult.details.schemas.length === 1) {
+          onSchemasChange([testResult.details.schemas[0]])
+        }
       }
     }
-  }, [testResult, onSchemaChange, selectedSchema])
+  }, [testResult, onSchemasChange, selectedSchemas.length])
 
   const refreshSchemas = async () => {
     setRefreshing(true)
@@ -126,9 +125,9 @@ export function SchemaSelector({
       <div className="border-t pt-6">
         <div className="space-y-4">
           <div className="space-y-1">
-            <h4 className="text-base font-medium">Select Schema</h4>
+            <h4 className="text-base font-medium">Select Schemas</h4>
             <p className="text-sm text-muted-foreground">
-              Choose the database schema you want to work with. This determines which tables and views will be available.
+              Choose the database schemas you want to work with. Only selected schemas will be visible in the SQL Editor.
             </p>
           </div>
 
@@ -146,39 +145,77 @@ export function SchemaSelector({
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label htmlFor="schema">
-                  Schema <span className="text-destructive">*</span>
+                <Label>
+                  Schemas <span className="text-destructive">*</span>
                 </Label>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={refreshSchemas} 
-                  disabled={refreshing}
-                  className="h-7 px-2 text-xs"
-                >
-                  <RefreshCw className={`h-3 w-3 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
-                  Refresh
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => onSchemasChange(schemas)}
+                    className="h-7 px-2 text-xs"
+                  >
+                    Select All
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => onSchemasChange([])}
+                    className="h-7 px-2 text-xs"
+                  >
+                    Clear
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={refreshSchemas} 
+                    disabled={refreshing}
+                    className="h-7 px-2 text-xs"
+                  >
+                    <RefreshCw className={`h-3 w-3 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </Button>
+                </div>
               </div>
               
-              <Select value={selectedSchema || ''} onValueChange={onSchemaChange}>
-                <SelectTrigger id="schema" className="w-full">
-                  <SelectValue placeholder="Select a schema..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {schemas.map((schema) => (
-                    <SelectItem key={schema} value={schema}>
-                      <div className="flex items-center gap-2">
-                        <Database className="h-3 w-3 text-muted-foreground" />
-                        {schema}
+              <ScrollArea className="h-48 border rounded-lg p-2">
+                <div className="space-y-1">
+                  {schemas.map((schema) => {
+                    const isSelected = selectedSchemas.includes(schema)
+                    return (
+                      <div
+                        key={schema}
+                        className={`flex items-center gap-3 p-2 rounded-md cursor-pointer transition-colors ${
+                          isSelected ? 'bg-primary/10' : 'hover:bg-muted'
+                        }`}
+                        onClick={() => {
+                          if (isSelected) {
+                            onSchemasChange(selectedSchemas.filter(s => s !== schema))
+                          } else {
+                            onSchemasChange([...selectedSchemas, schema])
+                          }
+                        }}
+                      >
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              onSchemasChange([...selectedSchemas, schema])
+                            } else {
+                              onSchemasChange(selectedSchemas.filter(s => s !== schema))
+                            }
+                          }}
+                        />
+                        <Database className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm font-medium">{schema}</span>
                       </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                    )
+                  })}
+                </div>
+              </ScrollArea>
 
               <p className="text-xs text-muted-foreground">
-                {schemas.length} schema{schemas.length !== 1 ? 's' : ''} available
+                {selectedSchemas.length} of {schemas.length} schema{schemas.length !== 1 ? 's' : ''} selected
               </p>
             </div>
           )}
@@ -187,11 +224,16 @@ export function SchemaSelector({
             <p className="text-sm text-destructive">{refreshError}</p>
           )}
 
-          {selectedSchema && (
+          {selectedSchemas.length > 0 && (
             <div className="p-3 bg-primary/5 border border-primary/20 rounded-lg">
               <p className="text-sm">
-                <span className="font-medium">Selected:</span>{' '}
-                <code className="px-1.5 py-0.5 bg-primary/10 rounded text-primary font-mono">{selectedSchema}</code>
+                <span className="font-medium">Selected schemas:</span>{' '}
+                {selectedSchemas.map((schema, idx) => (
+                  <span key={schema}>
+                    <code className="px-1.5 py-0.5 bg-primary/10 rounded text-primary font-mono">{schema}</code>
+                    {idx < selectedSchemas.length - 1 && ', '}
+                  </span>
+                ))}
               </p>
             </div>
           )}

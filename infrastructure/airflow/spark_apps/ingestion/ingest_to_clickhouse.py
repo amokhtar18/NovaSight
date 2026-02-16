@@ -41,20 +41,25 @@ class DataIngestionJob:
         
         # Add JDBC driver based on source type
         jdbc_jars = {
-            'postgresql': '/opt/spark/jars/postgresql-42.6.0.jar',
-            'mysql': '/opt/spark/jars/mysql-connector-j-8.2.0.jar',
-            'oracle': '/opt/spark/jars/ojdbc8.jar',
-            'sqlserver': '/opt/spark/jars/mssql-jdbc-12.4.2.jre11.jar',
+            'postgresql': '/opt/spark/jars/custom/postgresql-42.7.4.jar',
+            'mysql': '/opt/spark/jars/custom/mysql-connector-j-8.2.0.jar',
+            'oracle': '/opt/spark/jars/custom/ojdbc8.jar',
+            'sqlserver': '/opt/spark/jars/custom/mssql-jdbc-12.4.2.jre11.jar',
         }
         
         db_type = self.config['datasource_type']
         if db_type in jdbc_jars:
             builder = builder.config('spark.jars', jdbc_jars[db_type])
         
+        # Fix Oracle timezone issue (ORA-01882)
+        if db_type == 'oracle':
+            builder = builder.config('spark.driver.extraJavaOptions', '-Duser.timezone=UTC -Doracle.jdbc.timezoneAsRegion=false')
+            builder = builder.config('spark.executor.extraJavaOptions', '-Duser.timezone=UTC -Doracle.jdbc.timezoneAsRegion=false')
+        
         # Add ClickHouse JDBC driver
         builder = builder.config(
             'spark.jars',
-            '/opt/spark/jars/clickhouse-jdbc-0.4.6-all.jar'
+            '/opt/spark/jars/custom/clickhouse-jdbc-0.6.3.jar'
         )
         
         return builder.getOrCreate()

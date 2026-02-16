@@ -73,13 +73,6 @@ SPARK_MASTER_CONTAINER = os.environ.get('SPARK_MASTER_CONTAINER', 'novasight-spa
 
 # Check if native Spark is available
 SPARK_NATIVE_AVAILABLE = os.path.exists(f'{SPARK_HOME}/bin/spark-submit')
-
-# Custom JARs for JDBC connectivity
-JDBC_JARS = [
-    f'{SPARK_HOME}/jars/custom/postgresql-42.7.4.jar',
-    f'{SPARK_HOME}/jars/custom/clickhouse-jdbc-0.6.3.jar',
-]
-JDBC_JARS_STR = ','.join(JDBC_JARS)
 {% endmacro %}
 
 {% macro default_args(owner, retries=2, retry_delay_minutes=5, email=none, email_on_failure=false, email_on_success=false, execution_timeout_hours=2) %}

@@ -195,7 +195,11 @@ class OracleConnector(BaseConnector):
                         'DBSNMP', 'APPQOSSYS', 'WMSYS', 'EXFSYS', 'CTXSYS',
                         'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA', 'ORDPLUGINS',
                         'MDSYS', 'OLAPSYS', 'SYSMAN', 'FLOWS_FILES', 'APEX_PUBLIC_USER',
-                        'APEX_040000', 'APEX_040100', 'APEX_040200', 'OWBSYS', 'OWBSYS_AUDIT'
+                        'APEX_040000', 'APEX_040100', 'APEX_040200', 'OWBSYS', 'OWBSYS_AUDIT',
+                        'GSMADMIN_INTERNAL', 'AUDSYS', 'DVF', 'DVSYS', 'LBACSYS',
+                        'DBSFWUSER', 'REMOTE_SCHEDULER_AGENT', 'OJVMSYS', 'SI_INFORMTN_SCHEMA',
+                        'GGSYS', 'GSMCATUSER', 'SYSBACKUP', 'SYSDG', 'SYSKM', 'SYSRAC',
+                        'SYS$UMF', 'GSMUSER', 'XS$NULL'
                     )
                     ORDER BY username
                 """)
@@ -276,17 +280,17 @@ class OracleConnector(BaseConnector):
                     FROM (
                         SELECT table_name, owner, num_rows
                         FROM all_tables
-                        WHERE owner = :schema AND table_name = :table
+                        WHERE owner = :owner_name AND table_name = :tbl_name
                         UNION ALL
                         SELECT view_name, owner, NULL
                         FROM all_views
-                        WHERE owner = :schema AND view_name = :table
+                        WHERE owner = :owner_name AND view_name = :tbl_name
                     ) t
                     LEFT JOIN all_tab_comments c
                         ON t.owner = c.owner AND t.table_name = c.table_name
                     WHERE ROWNUM = 1
                     """,
-                    {"schema": schema.upper(), "table": table.upper()},
+                    {"owner_name": schema.upper(), "tbl_name": table.upper()},
                 )
 
                 table_row = cur.fetchone()
@@ -334,8 +338,8 @@ class OracleConnector(BaseConnector):
                         ON cons.owner = cols.owner
                         AND cons.constraint_name = cols.constraint_name
                     WHERE cons.constraint_type = 'P'
-                    AND cons.owner = :schema
-                    AND cons.table_name = :table
+                    AND cons.owner = :owner_name
+                    AND cons.table_name = :tbl_name
                 ) pk
                     ON c.owner = pk.owner
                     AND c.table_name = pk.table_name
@@ -344,10 +348,10 @@ class OracleConnector(BaseConnector):
                     ON c.owner = cc.owner
                     AND c.table_name = cc.table_name
                     AND c.column_name = cc.column_name
-                WHERE c.owner = :schema AND c.table_name = :table
+                WHERE c.owner = :owner_name AND c.table_name = :tbl_name
                 ORDER BY c.column_id
                 """,
-                {"schema": schema.upper(), "table": table.upper()},
+                {"owner_name": schema.upper(), "tbl_name": table.upper()},
             )
 
             columns = []
@@ -367,6 +371,86 @@ class OracleConnector(BaseConnector):
                 )
 
             return columns
+
+    def get_tables_with_columns(self, schema: str) -> List[TableInfo]:
+        """
+        Get all tables with columns in optimized batch queries for Oracle.
+        Fetches all columns for all tables in a single query.
+        """
+        try:
+            conn = self._ensure_connection()
+            schema_upper = schema.upper()
+
+            # First get all tables
+            tables = self.get_tables(schema)
+            if not tables:
+                return []
+
+            # Build a map of table names to TableInfo objects
+            table_map = {t.name: t for t in tables}
+
+            # Fetch all columns for all tables in one query
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        c.table_name,
+                        c.column_name,
+                        c.data_type,
+                        c.nullable,
+                        c.data_default,
+                        c.char_length,
+                        c.data_precision,
+                        c.data_scale,
+                        CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END as is_primary_key,
+                        cc.comments
+                    FROM all_tab_columns c
+                    LEFT JOIN (
+                        SELECT cols.owner, cols.table_name, cols.column_name
+                        FROM all_constraints cons
+                        JOIN all_cons_columns cols
+                            ON cons.owner = cols.owner
+                            AND cons.constraint_name = cols.constraint_name
+                        WHERE cons.constraint_type = 'P'
+                        AND cons.owner = :owner_name
+                    ) pk
+                        ON c.owner = pk.owner
+                        AND c.table_name = pk.table_name
+                        AND c.column_name = pk.column_name
+                    LEFT JOIN all_col_comments cc
+                        ON c.owner = cc.owner
+                        AND c.table_name = cc.table_name
+                        AND c.column_name = cc.column_name
+                    WHERE c.owner = :owner_name
+                    ORDER BY c.table_name, c.column_id
+                    """,
+                    {"owner_name": schema_upper},
+                )
+
+                # Group columns by table
+                for row in cur.fetchall():
+                    table_name = row[0]
+                    if table_name in table_map:
+                        table_map[table_name].columns.append(
+                            ColumnInfo(
+                                name=row[1],
+                                data_type=row[2],
+                                nullable=row[3] == "Y",
+                                primary_key=bool(row[8]),
+                                comment=row[9] or "",
+                                default_value=row[4],
+                                max_length=row[5],
+                                precision=row[6],
+                                scale=row[7],
+                            )
+                        )
+
+            return tables
+
+        except oracledb.Error as e:
+            logger.error(f"Failed to get tables with columns for schema {schema}: {e}")
+            # Fall back to individual queries
+            return super().get_tables_with_columns(schema)
 
     def _is_thick_mode(self) -> bool:
         """Check if thick mode is enabled (indicates Oracle 11g or earlier)."""

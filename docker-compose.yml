@@ -108,8 +108,8 @@ services:
 
   airflow-init:
     build:
-      context: ./docker/airflow
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: docker/airflow/Dockerfile
     image: novasight-airflow:latest
     container_name: novasight-airflow-init
     depends_on:
@@ -168,8 +168,8 @@ services:
   # Airflow 3.x API Server (replaces webserver in Airflow 3.x)
   airflow-api-server:
     build:
-      context: ./docker/airflow
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: docker/airflow/Dockerfile
     image: novasight-airflow:latest
     container_name: novasight-airflow-api-server
     restart: unless-stopped
@@ -220,8 +220,8 @@ services:
   # Airflow 3.x DAG Processor (new in Airflow 3.x - required)
   airflow-dag-processor:
     build:
-      context: ./docker/airflow
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: docker/airflow/Dockerfile
     image: novasight-airflow:latest
     container_name: novasight-airflow-dag-processor
     restart: unless-stopped
@@ -263,8 +263,8 @@ services:
 
   airflow-scheduler:
     build:
-      context: ./docker/airflow
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: docker/airflow/Dockerfile
     image: novasight-airflow:latest
     container_name: novasight-airflow-scheduler
     restart: unless-stopped
@@ -315,8 +315,8 @@ services:
   # Airflow 3.x Triggerer (for deferrable tasks)
   airflow-triggerer:
     build:
-      context: ./docker/airflow
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: docker/airflow/Dockerfile
     image: novasight-airflow:latest
     container_name: novasight-airflow-triggerer
     restart: unless-stopped

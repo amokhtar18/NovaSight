@@ -37,12 +37,6 @@ SPARK_MASTER_CONTAINER = os.environ.get('SPARK_MASTER_CONTAINER', 'novasight-spa
 # Check if native Spark is available (preferred)
 SPARK_NATIVE_AVAILABLE = os.path.exists(f'{SPARK_HOME}/bin/spark-submit')
 
-# JDBC JARs for database connectivity
-JDBC_JARS = ','.join([
-    f'{SPARK_HOME}/jars/custom/postgresql-42.7.4.jar',
-    f'{SPARK_HOME}/jars/custom/clickhouse-jdbc-0.6.3.jar',
-])
-
 
 # Default arguments for all tasks
 default_args = {
@@ -81,7 +75,6 @@ with DAG(
         application='{{ spark_app_path }}',
         application_args=['/opt/airflow/spark_apps/configs/{{ dag_id }}_config.json'],
         conn_id='spark_default',
-        jars=JDBC_JARS,
         executor_memory='{{ spark_conf.get("spark.executor.memory", "2g") }}',
         executor_cores={{ spark_conf.get("spark.executor.cores", 2) }},
         driver_memory='{{ spark_conf.get("spark.driver.memory", "1g") }}',

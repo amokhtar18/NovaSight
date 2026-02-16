@@ -44,7 +44,7 @@ class OllamaClient:
     def __init__(
         self,
         base_url: str = 'http://localhost:11434',
-        model: str = 'llama3.2',
+        model: str = 'Qwen3-vl',
         timeout: float = 120.0,
         max_retries: int = 3
     ):

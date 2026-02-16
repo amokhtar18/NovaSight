@@ -94,6 +94,22 @@ class SCDType1Job:
         # Job configuration
         self.batch_size = {{ options.batch_size | default(10000, true) }}
         
+        # Column type mappings: source column -> ClickHouse type
+        # Generated from source database type: {{ connection.db_type }}
+        self.column_type_mapping = {
+{% for col in columns %}
+            "{{ col.name }}": "{{ col.data_type | to_clickhouse_type(connection.db_type) }}",
+{% endfor %}
+        }
+        
+        # Metadata column types for ClickHouse
+        self.metadata_columns = {
+            "_novasight_app_id": "String",
+            "_novasight_extracted_at": "DateTime64(3)",
+            "_novasight_updated_at": "DateTime64(3)",
+            "_novasight_is_deleted": "UInt8",
+        }
+        
     def get_jdbc_url(self) -> str:
         """Build JDBC URL based on database type."""
         db_type = self.source_config["db_type"]
@@ -119,6 +135,83 @@ class SCDType1Job:
             "sqlserver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
         }
         return drivers.get(self.source_config["db_type"], "org.postgresql.Driver")
+    
+    def get_clickhouse_create_table_ddl(self) -> str:
+        """
+        Generate CREATE TABLE DDL for ClickHouse with proper type mappings.
+        Uses ReplacingMergeTree engine for SCD Type 1 (to handle updates).
+        
+        Returns:
+            CREATE TABLE DDL string
+        """
+        target_db = self.target_config["database"]
+        target_table = self.target_config["table"]
+        engine = self.target_config.get("engine", "ReplacingMergeTree")
+        
+        # Build column definitions with mapped ClickHouse types
+        column_defs = []
+        for col_name, ch_type in self.column_type_mapping.items():
+            column_defs.append(f"    `{col_name}` Nullable({ch_type})")
+        
+        # Add metadata columns (not nullable)
+        for col_name, ch_type in self.metadata_columns.items():
+            column_defs.append(f"    `{col_name}` {ch_type}")
+        
+        columns_str = ",\n".join(column_defs)
+        
+        # Use primary keys for ORDER BY (required for ReplacingMergeTree)
+        pk_cols = ", ".join([f"`{pk}`" for pk in self.primary_keys])
+        order_by_clause = f"ORDER BY ({pk_cols})" if pk_cols else "ORDER BY tuple()"
+        
+{% if target.partition_by %}
+        partition_clause = "PARTITION BY {{ target.partition_by }}"
+{% else %}
+        partition_clause = ""
+{% endif %}
+        
+        # For SCD Type 1, use ReplacingMergeTree with _novasight_updated_at as version
+        ddl = f"""
+CREATE TABLE IF NOT EXISTS `{target_db}`.`{target_table}`
+(
+{columns_str}
+)
+ENGINE = {engine}(_novasight_updated_at)
+{order_by_clause}
+{partition_clause}
+""".strip()
+        
+        return ddl
+    
+    def ensure_target_table(self):
+        """
+        Ensure the target ClickHouse table exists with correct schema.
+        
+        Creates the table if it doesn't exist, using the column type mappings
+        derived from the source database types.
+        """
+        import clickhouse_connect
+        
+        target_url = os.getenv("CLICKHOUSE_HOST", "localhost")
+        target_port = int(os.getenv("CLICKHOUSE_PORT", "8123"))
+        target_user = os.getenv("CLICKHOUSE_USER", "default")
+        target_password = os.getenv("CLICKHOUSE_PASSWORD", "")
+        
+        try:
+            client = clickhouse_connect.get_client(
+                host=target_url,
+                port=target_port,
+                username=target_user,
+                password=target_password,
+            )
+            
+            ddl = self.get_clickhouse_create_table_ddl()
+            logger.info(f"Creating target table if not exists:\n{ddl}")
+            
+            client.command(ddl)
+            logger.info(f"Target table ensured: {self.target_config['database']}.{self.target_config['table']}")
+            
+        except Exception as e:
+            logger.warning(f"Could not ensure target table via DDL (will rely on JDBC auto-create): {e}")
     
     def get_high_watermark(self) -> str:
         """Get high watermark from state store for CDC."""
@@ -216,32 +309,32 @@ class SCDType1Job:
         return target_url, target_host, target_port, target_user, target_password
     
     def ensure_target_table_exists(self):
-        """Create target table in ClickHouse if it doesn't exist."""
+        """Create target table in ClickHouse if it doesn't exist using proper type mappings."""
         _, target_host, target_port, target_user, target_password = self.get_clickhouse_connection()
         target_table = f"{self.target_config['database']}.{self.target_config['table']}"
         
-        # Build column definitions
+        # Build column definitions using mapped ClickHouse types
         column_defs = []
 {% for col in columns %}
 {% if col.name in primary_keys %}
-        column_defs.append("{{ col.name }} {{ col.clickhouse_type | default('String', true) }}")
+        column_defs.append("`{{ col.name }}` {{ col.data_type | to_clickhouse_type(connection.db_type) }}")
 {% else %}
-        column_defs.append("{{ col.name }} Nullable({{ col.clickhouse_type | default('String', true) }})")
+        column_defs.append("`{{ col.name }}` Nullable({{ col.data_type | to_clickhouse_type(connection.db_type) }})")
 {% endif %}
 {% endfor %}
         
         # Add metadata columns
         column_defs.extend([
-            "_novasight_app_id String",
-            "_novasight_tenant_id String",
-            "_novasight_loaded_at DateTime64(6) DEFAULT now64()",
-            "_novasight_updated_at Nullable(DateTime64(6))"
+            "`_novasight_app_id` String",
+            "`_novasight_tenant_id` String",
+            "`_novasight_loaded_at` DateTime64(6) DEFAULT now64()",
+            "`_novasight_updated_at` Nullable(DateTime64(6))"
         ])
         
         columns_sql = ",\n    ".join(column_defs)
         
         # Build ORDER BY from primary keys
-        order_by_cols = ", ".join(self.primary_keys)
+        order_by_cols = ", ".join([f"`{pk}`" for pk in self.primary_keys])
         
         # Use ReplacingMergeTree for SCD Type 1 (overwrites)
         create_sql = f"""
@@ -253,6 +346,7 @@ class SCDType1Job:
         """
         
         logger.info(f"Ensuring target table exists: {target_table}")
+        logger.debug(f"Create table DDL:\n{create_sql}")
         
         try:
             # Use ClickHouse HTTP interface to execute DDL

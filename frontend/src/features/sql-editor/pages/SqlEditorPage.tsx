@@ -3,7 +3,7 @@
  * Full-featured SQL editor with schema explorer, saved queries panel, and results view
  */
 
-import { useState, useCallback, useId, Suspense } from 'react'
+import { useState, useCallback, useId, Suspense, useEffect, useRef } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import {
   Database,
@@ -96,8 +96,14 @@ export function SqlEditorPage() {
   
   // Panel states
   const [savedQueriesPanelOpen, setSavedQueriesPanelOpen] = useState(true)
+  const [savedQueriesPanelWidth, setSavedQueriesPanelWidth] = useState(288) // 72 * 4 = 288px (w-72)
   const [schemaExplorerPanelOpen, setSchemaExplorerPanelOpen] = useState(true)
+  const [schemaExplorerPanelWidth, setSchemaExplorerPanelWidth] = useState(288) // 72 * 4 = 288px (w-72)
   const [searchQuery, setSearchQuery] = useState('')
+  
+  // Resize refs
+  const isResizingSavedQueries = useRef(false)
+  const isResizingSchemaExplorer = useRef(false)
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all')
   
   // Save dialog state
@@ -159,6 +165,20 @@ export function SqlEditorPage() {
       is_tenant_clickhouse: false,
     })),
   ]
+
+  // Auto-select first available datasource (prefer tenant ClickHouse)
+  useEffect(() => {
+    if (!selectedDatasourceId && allDatasources.length > 0 && !datasourcesLoading) {
+      // Prefer tenant ClickHouse if available
+      if (clickhouseInfo) {
+        setSelectedDatasourceId(TENANT_CLICKHOUSE_ID)
+        setIsClickhouse(true)
+      } else if (datasources.length > 0) {
+        setSelectedDatasourceId(datasources[0].id)
+        setIsClickhouse(false)
+      }
+    }
+  }, [selectedDatasourceId, allDatasources.length, datasourcesLoading, clickhouseInfo, datasources])
 
   // Get the actual connection ID for schema explorer
   const schemaConnectionId = isClickhouse ? undefined : selectedDatasourceId
@@ -408,15 +428,6 @@ export function SqlEditorPage() {
     [activeTab.sql, updateTabSql]
   )
 
-  // Handle table click - insert SELECT * FROM table
-  const handleTableClick = useCallback(
-    (tableName: string) => {
-      const query = `SELECT * FROM ${tableName} LIMIT ${queryLimit}`
-      updateTabSql(query)
-    },
-    [updateTabSql, queryLimit]
-  )
-
   // Handle insert SELECT from schema explorer
   const handleInsertSelect = useCallback(
     (sql: string) => {
@@ -460,6 +471,63 @@ export function SqlEditorPage() {
       prev.map((tab) => (tab.id === tabId ? { ...tab, name } : tab))
     )
   }, [])
+
+  // Resize handlers for panels
+  const handleSavedQueriesResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    isResizingSavedQueries.current = true
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    
+    const startX = e.clientX
+    const startWidth = savedQueriesPanelWidth
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingSavedQueries.current) return
+      const diff = e.clientX - startX
+      const newWidth = Math.max(200, Math.min(500, startWidth + diff))
+      setSavedQueriesPanelWidth(newWidth)
+    }
+    
+    const handleMouseUp = () => {
+      isResizingSavedQueries.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+    
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [savedQueriesPanelWidth])
+
+  const handleSchemaExplorerResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    isResizingSchemaExplorer.current = true
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    
+    const startX = e.clientX
+    const startWidth = schemaExplorerPanelWidth
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingSchemaExplorer.current) return
+      const diff = e.clientX - startX
+      const newWidth = Math.max(200, Math.min(500, startWidth + diff))
+      setSchemaExplorerPanelWidth(newWidth)
+    }
+    
+    const handleMouseUp = () => {
+      isResizingSchemaExplorer.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+    
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [schemaExplorerPanelWidth])
 
   return (
     <TooltipProvider>
@@ -565,12 +633,26 @@ export function SqlEditorPage() {
 
         {/* Main Content */}
         <div className="flex-1 flex overflow-hidden">
+          {/* Toggle Saved Queries Button - Left side */}
+          <button
+            onClick={() => setSavedQueriesPanelOpen(!savedQueriesPanelOpen)}
+            className="w-5 flex-shrink-0 bg-muted/50 hover:bg-muted border-r flex items-center justify-center transition-colors"
+            title={savedQueriesPanelOpen ? "Collapse saved queries" : "Expand saved queries"}
+          >
+            {savedQueriesPanelOpen ? (
+              <ChevronLeft className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            )}
+          </button>
+
           {/* Saved Queries Panel - Left */}
           <div 
             className={cn(
-              "border-r bg-card transition-all duration-300 flex flex-col",
-              savedQueriesPanelOpen ? "w-72" : "w-0"
+              "bg-card flex flex-col relative",
+              savedQueriesPanelOpen ? "" : "w-0 overflow-hidden"
             )}
+            style={savedQueriesPanelOpen ? { width: savedQueriesPanelWidth } : undefined}
           >
             {savedQueriesPanelOpen && (
               <>
@@ -643,21 +725,15 @@ export function SqlEditorPage() {
                     )}
                   </div>
                 </ScrollArea>
+                
+                {/* Resize Handle */}
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 active:bg-primary/70 transition-colors"
+                  onMouseDown={handleSavedQueriesResizeStart}
+                />
               </>
             )}
           </div>
-
-          {/* Toggle Panel Button */}
-          <button
-            onClick={() => setSavedQueriesPanelOpen(!savedQueriesPanelOpen)}
-            className="w-5 flex-shrink-0 bg-muted/50 hover:bg-muted border-r flex items-center justify-center transition-colors"
-          >
-            {savedQueriesPanelOpen ? (
-              <ChevronLeft className="h-4 w-4 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            )}
-          </button>
 
           {/* Editor Area */}
           {!selectedDatasourceId ? (
@@ -672,30 +748,10 @@ export function SqlEditorPage() {
           ) : (
             <div className="flex-1 flex overflow-hidden">
               {/* Schema Explorer - Collapsible */}
-              <div 
-                className={cn(
-                  "border-r flex-shrink-0 overflow-hidden bg-card transition-all duration-300",
-                  schemaExplorerPanelOpen ? "w-72" : "w-0"
-                )}
-              >
-                {schemaExplorerPanelOpen && (
-                  <SchemaExplorer
-                    schemas={schemas}
-                    isLoading={schemaLoading}
-                    error={schemaError}
-                    onRefresh={() => refetchSchema()}
-                    onColumnClick={handleColumnClick}
-                    onTableClick={handleTableClick}
-                    onInsertSelect={handleInsertSelect}
-                    className="h-full"
-                  />
-                )}
-              </div>
-              
-              {/* Toggle Schema Explorer Button */}
+              {/* Toggle Schema Explorer Button - positioned before explorer to avoid covering buttons */}
               <button
                 onClick={() => setSchemaExplorerPanelOpen(!schemaExplorerPanelOpen)}
-                className="w-5 flex-shrink-0 bg-muted/50 hover:bg-muted border-r flex items-center justify-center transition-colors"
+                className="w-5 flex-shrink-0 bg-muted/50 hover:bg-muted border-r flex items-center justify-center transition-colors z-10"
                 title={schemaExplorerPanelOpen ? "Collapse schema explorer" : "Expand schema explorer"}
               >
                 {schemaExplorerPanelOpen ? (
@@ -704,6 +760,34 @@ export function SqlEditorPage() {
                   <ChevronRight className="h-4 w-4 text-muted-foreground" />
                 )}
               </button>
+
+              {/* Schema Explorer Panel */}
+              <div 
+                className={cn(
+                  "flex-shrink-0 bg-card relative",
+                  schemaExplorerPanelOpen ? "" : "w-0 overflow-hidden"
+                )}
+                style={schemaExplorerPanelOpen ? { width: schemaExplorerPanelWidth } : undefined}
+              >
+                {schemaExplorerPanelOpen && (
+                  <>
+                    <SchemaExplorer
+                      schemas={schemas}
+                      isLoading={schemaLoading}
+                      error={schemaError}
+                      onRefresh={() => refetchSchema()}
+                      onColumnClick={handleColumnClick}
+                      onInsertSelect={handleInsertSelect}
+                      className="h-full"
+                    />
+                    {/* Resize Handle */}
+                    <div
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 active:bg-primary/70 transition-colors"
+                      onMouseDown={handleSchemaExplorerResizeStart}
+                    />
+                  </>
+                )}
+              </div>
 
               {/* Editor and Results */}
               <div className="flex-1 flex flex-col overflow-hidden">

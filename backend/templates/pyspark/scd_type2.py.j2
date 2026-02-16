@@ -116,6 +116,26 @@ class SCDType2Job:
         self.batch_size = {{ options.batch_size | default(10000, true) }}
         self.current_timestamp = datetime.utcnow()
         
+        # Column type mappings: source column -> ClickHouse type
+        # Generated from source database type: {{ connection.db_type }}
+        self.column_type_mapping = {
+{% for col in columns %}
+            "{{ col.name }}": "{{ col.data_type | to_clickhouse_type(connection.db_type) }}",
+{% endfor %}
+        }
+        
+        # SCD Type 2 metadata column types for ClickHouse
+        self.scd_columns = {
+            "_scd_hash": "String",
+            "_scd_valid_from": "DateTime64(6)",
+            "_scd_valid_to": "Nullable(DateTime64(6))",
+            "_scd_is_current": "Bool",
+            "_scd_version": "UInt32",
+            "_novasight_app_id": "String",
+            "_novasight_tenant_id": "String",
+            "_novasight_loaded_at": "DateTime64(6)",
+        }
+        
     def get_jdbc_url(self) -> str:
         """Build JDBC URL based on database type."""
         db_type = self.source_config["db_type"]
@@ -244,37 +264,37 @@ class SCDType2Job:
         return target_url, target_host, target_port, target_user, target_password
     
     def ensure_target_table_exists(self):
-        """Create target table in ClickHouse if it doesn't exist."""
+        """Create target table in ClickHouse if it doesn't exist using proper type mappings."""
         _, target_host, target_port, target_user, target_password = self.get_clickhouse_connection()
         target_table = f"{self.target_config['database']}.{self.target_config['table']}"
         
-        # Build column definitions
+        # Build column definitions using mapped ClickHouse types
         column_defs = []
 {% for col in columns %}
 {% if col.name in primary_keys %}
-        column_defs.append("{{ col.name }} {{ col.clickhouse_type | default('String', true) }}")
+        column_defs.append("`{{ col.name }}` {{ col.data_type | to_clickhouse_type(connection.db_type) }}")
 {% else %}
-        column_defs.append("{{ col.name }} Nullable({{ col.clickhouse_type | default('String', true) }})")
+        column_defs.append("`{{ col.name }}` Nullable({{ col.data_type | to_clickhouse_type(connection.db_type) }})")
 {% endif %}
 {% endfor %}
         
         # Add SCD Type 2 columns
         column_defs.extend([
-            "_scd_hash String",
-            "_scd_valid_from DateTime64(6) DEFAULT now64()",
-            "_scd_valid_to Nullable(DateTime64(6))",
-            "_scd_is_current Bool DEFAULT true",
-            "_scd_version UInt32 DEFAULT 1",
-            "_novasight_app_id String",
-            "_novasight_tenant_id String",
-            "_novasight_loaded_at DateTime64(6) DEFAULT now64()"
+            "`_scd_hash` String",
+            "`_scd_valid_from` DateTime64(6) DEFAULT now64()",
+            "`_scd_valid_to` Nullable(DateTime64(6))",
+            "`_scd_is_current` Bool DEFAULT true",
+            "`_scd_version` UInt32 DEFAULT 1",
+            "`_novasight_app_id` String",
+            "`_novasight_tenant_id` String",
+            "`_novasight_loaded_at` DateTime64(6) DEFAULT now64()"
         ])
         
         columns_sql = ",\n    ".join(column_defs)
         
         # Build ORDER BY from primary keys + _scd_valid_from
-        order_by_cols = ", ".join(self.primary_keys + ["_scd_valid_from"])
-        primary_key_cols = ", ".join(self.primary_keys)
+        order_by_cols = ", ".join([f"`{pk}`" for pk in self.primary_keys] + ["`_scd_valid_from`"])
+        primary_key_cols = ", ".join([f"`{pk}`" for pk in self.primary_keys])
         
         create_sql = f"""
         CREATE TABLE IF NOT EXISTS {target_table} (
@@ -285,6 +305,7 @@ class SCDType2Job:
         """
         
         logger.info(f"Ensuring target table exists: {target_table}")
+        logger.debug(f"Create table DDL:\n{create_sql}")
         
         try:
             # Use ClickHouse HTTP interface to execute DDL

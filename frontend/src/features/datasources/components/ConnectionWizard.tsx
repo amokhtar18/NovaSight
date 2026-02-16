@@ -52,7 +52,7 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
   const [currentStep, setCurrentStep] = useState(0)
   const [selectedType, setSelectedType] = useState<DatabaseType | null>(null)
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null)
-  const [selectedSchema, setSelectedSchema] = useState<string | null>(null)
+  const [selectedSchemas, setSelectedSchemas] = useState<string[]>([])
 
   const testConnection = useTestNewConnection()
   const createDataSource = useCreateDataSource()
@@ -124,12 +124,17 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
   const handleFinish = async () => {
     const data = form.getValues()
     try {
-      const extraParams = buildExtraParams(data)
+      const extraParams = buildExtraParams(data) || {}
+      
+      // Add allowed_schemas to extra_params if schemas were selected
+      if (selectedSchemas.length > 0) {
+        extraParams.allowed_schemas = selectedSchemas
+      }
       
       await createDataSource.mutateAsync({
         ...data,
-        schema_name: selectedSchema || undefined,
-        extra_params: extraParams,
+        schema_name: selectedSchemas[0] || undefined, // Use first selected schema as default
+        extra_params: Object.keys(extraParams).length > 0 ? extraParams : undefined,
       })
       handleClose()
       onSuccess?.()
@@ -142,7 +147,7 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
     setCurrentStep(0)
     setSelectedType(null)
     setTestResult(null)
-    setSelectedSchema(null)
+    setSelectedSchemas([])
     form.reset()
     onOpenChange(false)
   }
@@ -156,8 +161,8 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
       case 2:
         return testResult?.success
       case 3:
-        // Schema selection is required
-        return selectedSchema !== null
+        // At least one schema must be selected
+        return selectedSchemas.length > 0
       default:
         return true
     }
@@ -236,8 +241,8 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
             <SchemaSelector
               connectionData={form.getValues()}
               testResult={testResult}
-              selectedSchema={selectedSchema}
-              onSchemaChange={setSelectedSchema}
+              selectedSchemas={selectedSchemas}
+              onSchemasChange={setSelectedSchemas}
             />
           )}
         </div>

@@ -271,3 +271,68 @@ def indent_lines(value: str, spaces: int = 4, first_line: bool = False) -> str:
         result = [lines[0]]
         result.extend(indent + line for line in lines[1:])
         return '\n'.join(result)
+
+
+def to_clickhouse_type(source_type: str, database: str = "postgresql") -> str:
+    """
+    Map a source database type to a ClickHouse type.
+    
+    This filter uses the ClickHouseTypeMapper for comprehensive type conversion
+    from various source databases (PostgreSQL, MySQL, Oracle, SQL Server) to
+    ClickHouse types.
+    
+    Args:
+        source_type: The source database column type (e.g., "varchar(255)", "numeric(18,4)")
+        database: Source database type ('postgresql', 'mysql', 'oracle', 'sqlserver')
+    
+    Returns:
+        Corresponding ClickHouse type string
+        
+    Examples:
+        {{ "varchar(255)" | to_clickhouse_type("postgresql") }}  -> "String"
+        {{ "numeric(18,4)" | to_clickhouse_type("postgresql") }}  -> "Decimal64(4)"
+        {{ "int" | to_clickhouse_type("mysql") }}  -> "Int32"
+        {{ "datetime2" | to_clickhouse_type("sqlserver") }}  -> "DateTime64(3)"
+    """
+    from app.domains.datasources.infrastructure.connectors.utils.type_mapping import (
+        ClickHouseTypeMapper,
+    )
+    
+    return ClickHouseTypeMapper.map_type(source_type, database)
+
+
+def clickhouse_column_def(
+    column_name: str,
+    source_type: str,
+    database: str = "postgresql",
+    nullable: bool = True,
+    default_value: str = None,
+) -> str:
+    """
+    Generate a ClickHouse column definition for CREATE TABLE.
+    
+    Args:
+        column_name: Column name
+        source_type: Source database type
+        database: Source database type ('postgresql', 'mysql', 'oracle', 'sqlserver')
+        nullable: Whether column allows NULL
+        default_value: Default value expression
+    
+    Returns:
+        ClickHouse column definition string
+        
+    Examples:
+        {{ "created_at" | clickhouse_column_def("timestamp", "postgresql", False) }}
+        -> "created_at DateTime NOT NULL"
+    """
+    from app.domains.datasources.infrastructure.connectors.utils.type_mapping import (
+        ClickHouseTypeMapper,
+    )
+    
+    return ClickHouseTypeMapper.get_create_table_column_def(
+        column_name=column_name,
+        source_type=source_type,
+        database=database,
+        nullable=nullable,
+        default_value=default_value,
+    )

@@ -44,7 +44,7 @@ class MySQLConnector(BaseConnector):
                 "collation": "utf8mb4_unicode_ci",
                 "autocommit": False,
                 "connection_timeout": 10,
-                **self.config.extra_params,
+                **self.config.driver_extra_params,
             }
 
             if self.config.ssl:
@@ -234,6 +234,68 @@ class MySQLConnector(BaseConnector):
 
         cursor.close()
         return columns
+
+    def get_tables_with_columns(self, schema: str) -> List[TableInfo]:
+        """
+        Get all tables with columns in optimized batch queries for MySQL.
+        Fetches all columns for all tables in a single query.
+        """
+        try:
+            # First get all tables
+            tables = self.get_tables(schema)
+            if not tables:
+                return []
+
+            # Build a map of table names to TableInfo objects
+            table_map = {t.name: t for t in tables}
+
+            # Fetch all columns for all tables in the schema in one query
+            cursor = self._connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT
+                    TABLE_NAME as table_name,
+                    COLUMN_NAME as column_name,
+                    DATA_TYPE as data_type,
+                    IS_NULLABLE = 'YES' as is_nullable,
+                    COLUMN_DEFAULT as column_default,
+                    CHARACTER_MAXIMUM_LENGTH as max_length,
+                    NUMERIC_PRECISION as numeric_precision,
+                    NUMERIC_SCALE as numeric_scale,
+                    COLUMN_KEY = 'PRI' as is_primary_key,
+                    COLUMN_COMMENT as comment
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s
+                ORDER BY TABLE_NAME, ORDINAL_POSITION
+                """,
+                (schema,),
+            )
+
+            # Group columns by table
+            for row in cursor.fetchall():
+                table_name = row["table_name"]
+                if table_name in table_map:
+                    table_map[table_name].columns.append(
+                        ColumnInfo(
+                            name=row["column_name"],
+                            data_type=row["data_type"],
+                            nullable=bool(row["is_nullable"]),
+                            primary_key=bool(row["is_primary_key"]),
+                            comment=row["comment"] or "",
+                            default_value=row["column_default"],
+                            max_length=row["max_length"],
+                            precision=row["numeric_precision"],
+                            scale=row["numeric_scale"],
+                        )
+                    )
+
+            cursor.close()
+            return tables
+
+        except MySQLError as e:
+            logger.error(f"Failed to get tables with columns for schema {schema}: {e}")
+            # Fall back to individual queries
+            return super().get_tables_with_columns(schema)
 
     def fetch_data(
         self,

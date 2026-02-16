@@ -43,7 +43,7 @@ class PostgreSQLConnector(BaseConnector):
                 "sslmode": self.config.ssl_mode or ("require" if self.config.ssl else "disable"),
                 "connect_timeout": 10,
                 "application_name": "NovaSight",
-                **self.config.extra_params,
+                **self.config.driver_extra_params,
             }
 
             self._connection = psycopg2.connect(**connection_params)
@@ -95,6 +95,8 @@ class PostgreSQLConnector(BaseConnector):
                     WHERE schema_name NOT IN (
                         'pg_catalog', 'information_schema', 'pg_toast'
                     )
+                    AND schema_name NOT LIKE 'pg_temp%%'
+                    AND schema_name NOT LIKE 'pg_toast_temp%%'
                     ORDER BY schema_name
                 """)
                 return [row[0] for row in cur.fetchall()]
@@ -237,6 +239,80 @@ class PostgreSQLConnector(BaseConnector):
                 )
 
             return columns
+
+    def get_tables_with_columns(self, schema: str) -> List[TableInfo]:
+        """
+        Get all tables with columns in optimized batch queries for PostgreSQL.
+        Fetches all columns for all tables in a single query.
+        """
+        try:
+            # First get all tables
+            tables = self.get_tables(schema)
+            if not tables:
+                return []
+
+            # Build a map of table names to TableInfo objects
+            table_map = {t.name: t for t in tables}
+
+            # Fetch all columns for all tables in the schema in one query
+            with self._connection.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        c.table_name,
+                        c.column_name,
+                        c.data_type,
+                        c.is_nullable = 'YES' as is_nullable,
+                        c.column_default,
+                        c.character_maximum_length,
+                        c.numeric_precision,
+                        c.numeric_scale,
+                        CASE WHEN pk.column_name IS NOT NULL
+                             THEN true ELSE false END as is_primary_key,
+                        col_description(
+                            (quote_ident(c.table_schema) || '.' || quote_ident(c.table_name))::regclass,
+                            c.ordinal_position
+                        ) as comment
+                    FROM information_schema.columns c
+                    LEFT JOIN (
+                        SELECT ku.table_name, ku.column_name
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.key_column_usage ku
+                            ON tc.constraint_name = ku.constraint_name
+                            AND tc.table_schema = ku.table_schema
+                        WHERE tc.constraint_type = 'PRIMARY KEY'
+                        AND tc.table_schema = %s
+                    ) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
+                    WHERE c.table_schema = %s
+                    ORDER BY c.table_name, c.ordinal_position
+                    """,
+                    (schema, schema),
+                )
+
+                # Group columns by table
+                for row in cur.fetchall():
+                    table_name = row["table_name"]
+                    if table_name in table_map:
+                        table_map[table_name].columns.append(
+                            ColumnInfo(
+                                name=row["column_name"],
+                                data_type=row["data_type"],
+                                nullable=row["is_nullable"],
+                                primary_key=row["is_primary_key"],
+                                comment=row["comment"] or "",
+                                default_value=row["column_default"],
+                                max_length=row["character_maximum_length"],
+                                precision=row["numeric_precision"],
+                                scale=row["numeric_scale"],
+                            )
+                        )
+
+            return tables
+
+        except psycopg2.Error as e:
+            logger.error(f"Failed to get tables with columns for schema {schema}: {e}")
+            # Fall back to individual queries
+            return super().get_tables_with_columns(schema)
 
     def fetch_data(
         self,

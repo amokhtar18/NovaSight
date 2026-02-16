@@ -48,6 +48,14 @@ class ConnectionConfig(BaseModel):
     schema_name: Optional[str] = Field(default=None, alias="schema")
     extra_params: Dict[str, Any] = Field(default_factory=dict)
 
+    # NovaSight-specific extra_params keys that should NOT be passed to database drivers
+    _novasight_extra_keys = frozenset(["allowed_schemas", "thick_mode", "service_name"])
+
+    @property
+    def driver_extra_params(self) -> Dict[str, Any]:
+        """Return extra_params filtered to exclude NovaSight-specific keys."""
+        return {k: v for k, v in self.extra_params.items() if k not in self._novasight_extra_keys}
+
     @validator('host')
     def validate_host(cls, v):
         import ipaddress
@@ -94,6 +102,22 @@ class BaseConnector(ABC):
 
     @abstractmethod
     def get_table_schema(self, schema: str, table: str) -> TableInfo: ...
+
+    def get_tables_with_columns(self, schema: str) -> List[TableInfo]:
+        """
+        Get all tables with their columns in a single optimized query.
+        Override this method in connectors for better performance.
+        Default implementation falls back to individual queries.
+        """
+        tables = self.get_tables(schema)
+        for table in tables:
+            try:
+                table_with_cols = self.get_table_schema(schema, table.name)
+                table.columns = table_with_cols.columns
+            except Exception as e:
+                logger.warning(f"Failed to get columns for {schema}.{table.name}: {e}")
+                table.columns = []
+        return tables
 
     @abstractmethod
     def fetch_data(
