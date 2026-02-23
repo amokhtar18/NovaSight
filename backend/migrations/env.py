@@ -84,10 +84,6 @@ def run_migrations_online() -> None:
             target_metadata=target_metadata,
             compare_type=True,
             compare_server_default=True,
-            # Include schemas for multi-tenant support
-            include_schemas=True,
-            # Version table in public schema
-            version_table_schema="public",
         )
 
         with context.begin_transaction():
