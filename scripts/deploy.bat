@@ -19,6 +19,8 @@ REM   --clean          Remove volumes and start fresh
 REM   --skip-tests     Skip running tests before deployment
 REM   --no-spark       Skip Spark cluster (dev/test only)
 REM   --no-ollama      Skip Ollama LLM service
+REM   --no-airflow     Skip Airflow orchestration (use Dagster only)
+REM   --monitoring     Include monitoring stack (Prometheus, Grafana, Loki)
 REM   --dry-run        Show what would be done without executing
 REM   --version=TAG    Specify version tag (default: latest)
 REM   --help           Show this help message
@@ -37,6 +39,8 @@ set "CLEAN=false"
 set "SKIP_TESTS=false"
 set "NO_SPARK=false"
 set "NO_OLLAMA=false"
+set "NO_AIRFLOW=false"
+set "MONITORING=false"
 set "DRY_RUN=false"
 set "ROLLBACK=false"
 set "VERSION=latest"
@@ -55,6 +59,8 @@ if /i "%~1"=="--clean" set "CLEAN=true"
 if /i "%~1"=="--skip-tests" set "SKIP_TESTS=true"
 if /i "%~1"=="--no-spark" set "NO_SPARK=true"
 if /i "%~1"=="--no-ollama" set "NO_OLLAMA=true"
+if /i "%~1"=="--no-airflow" set "NO_AIRFLOW=true"
+if /i "%~1"=="--monitoring" set "MONITORING=true"
 if /i "%~1"=="--dry-run" set "DRY_RUN=true"
 if /i "%~1"=="--rollback" set "ROLLBACK=true"
 if /i "%~1"=="--help" goto :show_help
@@ -165,10 +171,15 @@ echo [INFO] Starting infrastructure services...
 echo [INFO] Waiting for databases to be healthy...
 timeout /t 10 /nobreak >nul
 
-echo [INFO] Starting Airflow services...
-%COMPOSE_CMD% up -d airflow-postgres airflow-init
-timeout /t 10 /nobreak >nul
-%COMPOSE_CMD% up -d airflow-webserver airflow-scheduler
+if "%NO_AIRFLOW%"=="false" (
+    echo [INFO] Starting Airflow 3.x services...
+    %COMPOSE_CMD% up -d airflow-postgres airflow-init
+    timeout /t 15 /nobreak >nul
+    echo [INFO] Starting Airflow API Server, DAG Processor, Scheduler, and Triggerer...
+    %COMPOSE_CMD% up -d airflow-api-server airflow-dag-processor airflow-scheduler airflow-triggerer
+) else (
+    echo [INFO] Skipping Airflow (--no-airflow flag set)
+)
 
 if "%NO_SPARK%"=="false" (
     echo [INFO] Starting Spark cluster...
@@ -180,8 +191,15 @@ if "%NO_OLLAMA%"=="false" (
     %COMPOSE_CMD% up -d ollama
 )
 
-echo [INFO] Starting application services...
+echo [INFO] Starting application services (with integrated Dagster)...
 %COMPOSE_CMD% up -d backend frontend %BUILD_FLAG%
+
+if "%MONITORING%"=="true" (
+    echo [INFO] Starting monitoring stack (Prometheus, Grafana, Loki)...
+    %COMPOSE_CMD% -f docker-compose.yml -f docker-compose.logging.yml up -d prometheus grafana loki promtail 2>nul || (
+        echo [WARN] Monitoring services not found in compose files. Skipping...
+    )
+)
 
 echo.
 echo [SUCCESS] Development environment deployed!
@@ -190,9 +208,15 @@ echo Services available at:
 echo   Frontend:     http://localhost:5173
 echo   Backend API:  http://localhost:5000
 echo   API Docs:     http://localhost:5000/api/v1/docs
-echo   Airflow:      http://localhost:8080 (airflow/airflow)
+echo   Dagster UI:   http://localhost:3000
+echo   Airflow UI:   http://localhost:8080 (airflow/airflow)
 echo   Spark UI:     http://localhost:8081
 echo   ClickHouse:   http://localhost:8123
+echo   Ollama:       http://localhost:11434
+echo.
+echo Default credentials:
+echo   NovaSight:   admin@novasight.io / Admin123!
+echo   Airflow:     airflow / airflow
 goto :deploy_success
 
 REM ============================================
@@ -387,6 +411,8 @@ echo   --clean          Remove volumes and start fresh
 echo   --skip-tests     Skip running tests before deployment
 echo   --no-spark       Skip Spark cluster (dev/test only)
 echo   --no-ollama      Skip Ollama LLM service
+echo   --no-airflow     Skip Airflow (use Dagster only)
+echo   --monitoring     Include monitoring stack (Prometheus, Grafana, Loki)
 echo   --dry-run        Show what would be done without executing
 echo   --rollback       Rollback to previous deployment (k8s only)
 echo   --version=TAG    Specify version tag (default: latest)
@@ -394,6 +420,7 @@ echo   --help           Show this help message
 echo.
 echo Examples:
 echo   %~nx0 dev --build             # Development with rebuild
+echo   %~nx0 dev --monitoring        # Development with monitoring stack
 echo   %~nx0 test                    # Run integration tests
 echo   %~nx0 staging --version=v1.2  # Deploy v1.2 to staging
 echo   %~nx0 production              # Production deployment

@@ -3,7 +3,12 @@ NovaSight Dagster Definitions
 ==============================
 
 Main entry point for Dagster orchestration.
-Dynamically loads pipelines from database at startup.
+Dynamically loads jobs and assets from database at startup.
+
+This unified module handles:
+1. PySpark extraction jobs with remote spark-submit
+2. DAG workflow scheduling
+3. Pipeline orchestration
 """
 
 from dagster import Definitions, EnvVar
@@ -14,8 +19,16 @@ import logging
 from orchestration.resources.spark_resource import SparkResource, DynamicSparkResource
 from orchestration.resources.clickhouse_resource import ClickHouseResource, DynamicClickHouseResource
 from orchestration.resources.database_resource import DatabaseResource
+from orchestration.resources.remote_spark_resource import (
+    RemoteSparkResource,
+    DynamicRemoteSparkResource,
+)
 from orchestration.assets.pyspark_builder import load_all_pyspark_assets
 from orchestration.schedules.pyspark_schedules import load_all_pyspark_schedules
+from orchestration.jobs.dagster_job_builder import (
+    load_all_dagster_jobs,
+    load_all_schedules as load_job_schedules,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +131,15 @@ pyspark_schedules = load_all_pyspark_schedules()
 all_schedules.extend(pyspark_schedules)
 logger.info(f"Loaded {len(pyspark_schedules)} PySpark job schedules")
 
+# Load Dagster jobs (new unified job system)
+all_jobs = load_all_dagster_jobs()
+logger.info(f"Loaded {len(all_jobs)} Dagster jobs for remote spark-submit")
+
+# Load job schedules
+job_schedules = load_job_schedules()
+all_schedules.extend(job_schedules)
+logger.info(f"Loaded {len(job_schedules)} job schedules")
+
 # Resource definitions
 # Static resources (for backwards compatibility)
 resources = {
@@ -134,6 +156,11 @@ resources = {
     "spark_dynamic": DynamicSparkResource(
         fallback_master=os.environ.get("SPARK_MASTER", "spark://spark-master:7077"),
         fallback_app_name="NovaSight",
+    ),
+    # Remote Spark resource (for SSH-based spark-submit on remote servers)
+    "spark_remote": DynamicRemoteSparkResource(
+        ssh_host=os.environ.get("SPARK_SSH_HOST", ""),
+        spark_master=os.environ.get("SPARK_MASTER", "spark://spark-master:7077"),
     ),
     # Static ClickHouse resource (uses environment config)
     "clickhouse": ClickHouseResource(
@@ -153,6 +180,7 @@ resources = {
 # Create Dagster definitions
 defs = Definitions(
     assets=all_assets,
+    jobs=all_jobs,
     schedules=all_schedules,
     sensors=[],  # Can be extended with sensors later
     resources=resources,

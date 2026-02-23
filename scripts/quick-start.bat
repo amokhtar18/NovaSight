@@ -82,6 +82,7 @@ echo.
 echo   Frontend:    http://localhost:5173
 echo   Backend:     http://localhost:5000
 echo   API Docs:    http://localhost:5000/api/v1/docs
+echo   Dagster UI:  http://localhost:3000 (integrated with backend)
 echo.
 echo Default credentials:
 echo   Email: admin@novasight.io

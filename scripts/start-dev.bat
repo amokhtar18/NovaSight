@@ -44,7 +44,7 @@ if not exist .env (
 REM Clean start if requested
 if "%CLEAN%"=="true" (
     echo Cleaning up existing containers and volumes...
-    docker-compose down -v
+    docker compose down -v
     echo Cleanup complete!
 )
 
@@ -57,36 +57,35 @@ if "%BUILD%"=="true" (
 
 echo.
 echo Starting infrastructure services...
-docker-compose up -d postgres redis clickhouse %BUILD_FLAG%
+docker compose up -d postgres redis clickhouse %BUILD_FLAG%
 
 echo Waiting for databases to be healthy...
-timeout /t 5 /nobreak > nul
-
-echo Starting Airflow services...
-docker-compose up -d airflow-postgres airflow-init
 timeout /t 10 /nobreak > nul
-docker-compose up -d airflow-webserver airflow-scheduler %BUILD_FLAG%
 
-echo Starting Dagster services...
-docker-compose up -d dagster-postgres
-timeout /t 5 >nul
-docker-compose up -d dagster-webserver dagster-daemon %BUILD_FLAG%
+echo Starting Airflow 3.x services...
+docker compose up -d airflow-postgres airflow-init
+timeout /t 15 /nobreak > nul
+echo Starting Airflow API Server, DAG Processor, Scheduler, and Triggerer...
+docker compose up -d airflow-api-server airflow-dag-processor airflow-scheduler airflow-triggerer %BUILD_FLAG%
+
+REM Dagster is now integrated into the backend container
+echo Dagster is integrated into the backend service...
 
 if "%NO_SPARK%"=="false" (
     echo Starting Spark cluster...
-    docker-compose up -d spark-master spark-worker-1 spark-worker-2
+    docker compose up -d spark-master spark-worker-1 spark-worker-2
 )
 
 if "%NO_OLLAMA%"=="false" (
     echo Starting Ollama LLM...
-    docker-compose up -d ollama
+    docker compose up -d ollama
 )
 
-echo Starting NovaSight backend...
-docker-compose up -d backend %BUILD_FLAG%
+echo Starting NovaSight backend (with integrated Dagster)...
+docker compose up -d backend %BUILD_FLAG%
 
 echo Starting NovaSight frontend...
-docker-compose up -d frontend %BUILD_FLAG%
+docker compose up -d frontend %BUILD_FLAG%
 
 echo.
 echo Waiting for all services to be healthy...
@@ -97,7 +96,7 @@ echo.
 echo ============================================
 echo Service Status
 echo ============================================
-docker-compose ps
+docker compose ps
 
 echo.
 echo ============================================

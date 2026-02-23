@@ -47,10 +47,6 @@ RUN if [ -f requirements-dev.txt ]; then pip install --no-cache-dir -r requireme
 # Copy application code
 COPY . .
 
-# Copy entrypoint script (from backend directory)
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh 2>/dev/null || true
-
 # Create supervisor log directory
 RUN mkdir -p /var/log/supervisor /var/dagster/logs
 
@@ -60,8 +56,12 @@ COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 # Expose ports (Flask: 5000, Dagster: 3000)
 EXPOSE 5000 3000
 
+# For development: use volume-mounted entrypoint for live updates
+# Ensure entrypoint from COPY . . is executable
+RUN chmod +x /app/entrypoint.sh 2>/dev/null || true
+
 # Entrypoint runs migrations + seed, then exec's CMD
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Run with supervisord to manage Flask + Dagster
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

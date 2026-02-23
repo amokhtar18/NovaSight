@@ -439,7 +439,7 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     container_name: novasight-backend
     restart: unless-stopped
     ports:

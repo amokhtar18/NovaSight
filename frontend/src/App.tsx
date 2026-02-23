@@ -23,6 +23,9 @@ import { DagsListPage } from '@/pages/orchestration/DagsListPage'
 import { DagBuilderPage } from '@/pages/orchestration/DagBuilderPage'
 import { DagMonitorPage } from '@/pages/orchestration/DagMonitorPage'
 import { DagsterDashboardPage } from '@/pages/orchestration/DagsterDashboardPage'
+import { JobsListPage } from '@/pages/orchestration/JobsListPage'
+import { JobBuilderPage } from '@/pages/orchestration/JobBuilderPage'
+import { SparkConfigPage } from '@/pages/orchestration/SparkConfigPage'
 import { DataSourcesPage, DataSourceDetailPage } from '@/features/datasources'
 import { 
   PySparkAppsListPage, 
@@ -108,6 +111,12 @@ function App() {
             <Route path="dags/:dagId/edit" element={<DagBuilderPage />} />
             <Route path="dags/:dagId/monitor" element={<DagMonitorPage />} />
             
+            {/* Spark Jobs - Unified Job Management */}
+            <Route path="jobs" element={<JobsListPage />} />
+            <Route path="jobs/new" element={<JobBuilderPage />} />
+            <Route path="jobs/:jobId/edit" element={<JobBuilderPage />} />
+            <Route path="jobs/spark-config" element={<SparkConfigPage />} />
+            
             {/* PySpark Apps */}
             <Route path="pyspark" element={<PySparkAppsListPage />} />
             <Route path="pyspark/new" element={<PySparkAppBuilderPage />} />
@@ -168,6 +177,7 @@ function App() {
           <Route path="/connections" element={<Navigate to="/app/datasources" replace />} />
           <Route path="/datasources" element={<Navigate to="/app/datasources" replace />} />
           <Route path="/dags" element={<Navigate to="/app/dags" replace />} />
+          <Route path="/jobs" element={<Navigate to="/app/jobs" replace />} />
           <Route path="/pyspark" element={<Navigate to="/app/pyspark" replace />} />
           <Route path="/semantic" element={<Navigate to="/app/semantic" replace />} />
           <Route path="/dashboards" element={<Navigate to="/app/dashboards" replace />} />

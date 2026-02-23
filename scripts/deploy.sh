@@ -19,6 +19,8 @@
 #   --skip-tests     Skip running tests before deployment
 #   --no-spark       Skip Spark cluster (dev/test only)
 #   --no-ollama      Skip Ollama LLM service
+#   --no-airflow     Skip Airflow (use Dagster only)
+#   --monitoring     Include monitoring stack (Prometheus, Grafana, Loki)
 #   --dry-run        Show what would be done without executing
 #   --verbose        Enable verbose output
 #   --rollback       Rollback to previous deployment (k8s only)
@@ -48,6 +50,8 @@ CLEAN=false
 SKIP_TESTS=false
 NO_SPARK=false
 NO_OLLAMA=false
+NO_AIRFLOW=false
+MONITORING=false
 DRY_RUN=false
 VERBOSE=false
 ROLLBACK=false
@@ -109,6 +113,8 @@ show_help() {
     echo "  --skip-tests     Skip running tests before deployment"
     echo "  --no-spark       Skip Spark cluster (dev/test only)"
     echo "  --no-ollama      Skip Ollama LLM service"
+    echo "  --no-airflow     Skip Airflow (use Dagster only)"
+    echo "  --monitoring     Include monitoring stack (Prometheus, Grafana, Loki)"
     echo "  --dry-run        Show what would be done without executing"
     echo "  --verbose        Enable verbose output"
     echo "  --rollback       Rollback to previous deployment (k8s only)"
@@ -117,6 +123,7 @@ show_help() {
     echo ""
     echo "Examples:"
     echo "  $0 dev --build             # Development with rebuild"
+    echo "  $0 dev --monitoring        # Development with monitoring stack"
     echo "  $0 test                    # Run integration tests"
     echo "  $0 staging --version=v1.2  # Deploy v1.2 to staging"
     echo "  $0 production              # Production deployment"
@@ -239,11 +246,16 @@ deploy_development() {
         print_info "Waiting for databases to be healthy..."
         sleep 10
         
-        # Start Airflow
-        print_info "Starting Airflow services..."
-        $compose_cmd up -d airflow-postgres airflow-init
-        sleep 10
-        $compose_cmd up -d airflow-webserver airflow-scheduler
+        # Start Airflow 3.x (unless disabled)
+        if [ "$NO_AIRFLOW" = false ]; then
+            print_info "Starting Airflow 3.x services..."
+            $compose_cmd up -d airflow-postgres airflow-init
+            sleep 15
+            print_info "Starting Airflow API Server, DAG Processor, Scheduler, and Triggerer..."
+            $compose_cmd up -d airflow-api-server airflow-dag-processor airflow-scheduler airflow-triggerer
+        else
+            print_info "Skipping Airflow (--no-airflow flag set, using Dagster only)"
+        fi
         
         # Start optional services
         if [ "$NO_SPARK" = false ]; then
@@ -256,9 +268,17 @@ deploy_development() {
             $compose_cmd up -d ollama
         fi
         
-        # Start application services
-        print_info "Starting application services..."
+        # Start application services (with integrated Dagster)
+        print_info "Starting application services (with integrated Dagster)..."
         $compose_cmd up -d backend frontend $build_flag
+        
+        # Start monitoring stack if requested
+        if [ "$MONITORING" = true ]; then
+            print_info "Starting monitoring stack (Prometheus, Grafana, Loki)..."
+            $compose_cmd -f docker-compose.yml -f docker-compose.logging.yml up -d prometheus grafana loki promtail 2>/dev/null || {
+                print_warning "Monitoring services not found in compose files. Skipping..."
+            }
+        fi
     fi
     
     print_success "Development environment deployed!"
@@ -267,9 +287,25 @@ deploy_development() {
     print_info "  Frontend:     http://localhost:5173"
     print_info "  Backend API:  http://localhost:5000"
     print_info "  API Docs:     http://localhost:5000/api/v1/docs"
-    print_info "  Airflow:      http://localhost:8080 (airflow/airflow)"
-    print_info "  Spark UI:     http://localhost:8081"
+    print_info "  Dagster UI:   http://localhost:3000"
+    if [ "$NO_AIRFLOW" = false ]; then
+        print_info "  Airflow UI:   http://localhost:8080 (airflow/airflow)"
+    fi
+    if [ "$NO_SPARK" = false ]; then
+        print_info "  Spark UI:     http://localhost:8081"
+    fi
     print_info "  ClickHouse:   http://localhost:8123"
+    if [ "$NO_OLLAMA" = false ]; then
+        print_info "  Ollama:       http://localhost:11434"
+    fi
+    if [ "$MONITORING" = true ]; then
+        print_info "  Grafana:      http://localhost:3001 (admin/admin)"
+        print_info "  Prometheus:   http://localhost:9090"
+    fi
+    print_info ""
+    print_info "Default credentials:"
+    print_info "  NovaSight:   admin@novasight.io / Admin123!"
+    print_info "  Airflow:     airflow / airflow"
 }
 
 # ============================================
@@ -482,6 +518,12 @@ parse_args() {
                 ;;
             --no-ollama)
                 NO_OLLAMA=true
+                ;;
+            --no-airflow)
+                NO_AIRFLOW=true
+                ;;
+            --monitoring)
+                MONITORING=true
                 ;;
             --dry-run)
                 DRY_RUN=true

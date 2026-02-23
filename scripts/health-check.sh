@@ -52,8 +52,9 @@ SERVICES=(
     ["clickhouse"]="http://localhost:8123/ping"
     ["backend"]="http://localhost:5000/health"
     ["frontend"]="http://localhost:5173"
-    ["airflow"]="http://localhost:8080/health"
-    ["spark"]="http://localhost:8081"
+    ["dagster"]="http://localhost:3000/server_info"
+    ["airflow-api-server"]="http://localhost:8080/api/v2/version"
+    ["spark-master"]="http://localhost:8081"
     ["ollama"]="http://localhost:11434/api/tags"
 )
 

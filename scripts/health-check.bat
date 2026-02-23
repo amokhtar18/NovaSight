@@ -16,6 +16,26 @@ echo.
 set "HEALTHY=0"
 set "UNHEALTHY=0"
 
+REM Check PostgreSQL (using Docker)
+docker exec novasight-postgres pg_isready -U novasight -d novasight_platform >nul 2>nul
+if %errorlevel%==0 (
+    echo   [OK] PostgreSQL is healthy
+    set /a HEALTHY+=1
+) else (
+    echo   [FAIL] PostgreSQL is not responding
+    set /a UNHEALTHY+=1
+)
+
+REM Check Redis (using Docker)
+docker exec novasight-redis redis-cli ping >nul 2>nul
+if %errorlevel%==0 (
+    echo   [OK] Redis is healthy
+    set /a HEALTHY+=1
+) else (
+    echo   [FAIL] Redis is not responding
+    set /a UNHEALTHY+=1
+)
+
 REM Check Backend
 curl -s -o nul -w "" --connect-timeout 2 http://localhost:5000/health 2>nul
 if %errorlevel%==0 (
@@ -46,13 +66,13 @@ if %errorlevel%==0 (
     set /a UNHEALTHY+=1
 )
 
-REM Check Airflow
-curl -s -o nul -w "" --connect-timeout 2 http://localhost:8080/health 2>nul
+REM Check Airflow 3.x API Server
+curl -s -o nul -w "" --connect-timeout 2 http://localhost:8080/api/v2/version 2>nul
 if %errorlevel%==0 (
-    echo   [OK] Airflow is healthy
+    echo   [OK] Airflow API Server is healthy
     set /a HEALTHY+=1
 ) else (
-    echo   [WARN] Airflow is not responding (may be disabled)
+    echo   [WARN] Airflow API Server is not responding (may be disabled)
     set /a UNHEALTHY+=1
 )
 

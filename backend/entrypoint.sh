@@ -50,6 +50,48 @@ print('Connected!')
 done
 echo "✅ Database connection ready"
 
+# ── 1b. Ensure Dagster database exists ──
+echo "🔧 Ensuring Dagster database exists..."
+python -c "
+import psycopg2
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+import os
+
+# Connect to postgres database to create dagster db
+url = os.environ.get('DATABASE_URL', 'postgresql://novasight:novasight@postgres:5432/novasight_platform')
+from urllib.parse import urlparse
+parsed = urlparse(url)
+
+# Connect to 'postgres' system database
+conn = psycopg2.connect(
+    host=parsed.hostname,
+    port=parsed.port or 5432,
+    user=parsed.username,
+    password=parsed.password,
+    dbname='postgres'
+)
+conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+cur = conn.cursor()
+
+# Check if dagster database exists
+cur.execute(\"SELECT 1 FROM pg_database WHERE datname='dagster'\")
+exists = cur.fetchone()
+
+if not exists:
+    print('Creating dagster database...')
+    cur.execute('CREATE DATABASE dagster')
+    cur.execute(f'GRANT ALL PRIVILEGES ON DATABASE dagster TO {parsed.username}')
+    print('Dagster database created!')
+else:
+    print('Dagster database already exists')
+
+cur.close()
+conn.close()
+" 2>&1 || {
+    echo "⚠️  Could not ensure dagster database. It may need manual creation."
+}
+echo "✅ Dagster database ready"
+
 # ── 2. Run Alembic migrations ──
 if [ "${SKIP_MIGRATIONS}" != "true" ]; then
     echo "🔄 Running database migrations..."

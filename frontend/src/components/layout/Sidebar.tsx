@@ -20,6 +20,7 @@ import {
   LayoutDashboard,
   Sparkles,
   Workflow,
+  Zap,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useState } from 'react'
@@ -34,6 +35,7 @@ const mainNavigation = [
 const orchestrateNavigation = [
   { name: 'Orchestration', href: '/app/orchestration', icon: Workflow },
   { name: 'Extract & Load', href: '/app/pyspark', icon: Upload },
+  { name: 'Spark Jobs', href: '/app/jobs', icon: Zap },
   { name: 'Task Scheduler', href: '/app/dags', icon: CalendarClock },
   { name: 'dbt Studio', href: '/app/dbt-studio', icon: GitBranch },
   { name: 'SQL Editor', href: '/app/sql', icon: Code2 },

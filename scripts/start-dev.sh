@@ -62,7 +62,7 @@ fi
 # Clean start if requested
 if [ "$CLEAN" = true ]; then
     echo -e "${YELLOW}Cleaning up existing containers and volumes...${NC}"
-    docker-compose down -v
+    docker compose down -v
     echo -e "${GREEN}Cleanup complete!${NC}"
 fi
 
@@ -87,36 +87,34 @@ fi
 
 echo ""
 echo -e "${BLUE}Starting infrastructure services...${NC}"
-docker-compose up -d postgres redis clickhouse $BUILD_FLAG
+docker compose up -d postgres redis clickhouse $BUILD_FLAG
 
 echo -e "${BLUE}Waiting for databases to be healthy...${NC}"
-sleep 5
-
-echo -e "${BLUE}Starting Airflow services...${NC}"
-docker-compose up -d airflow-postgres airflow-init
 sleep 10
-docker-compose up -d airflow-webserver airflow-scheduler $BUILD_FLAG
 
-echo -e "${BLUE}Starting Dagster services...${NC}"
-docker-compose up -d dagster-postgres
-sleep 5
-docker-compose up -d dagster-webserver dagster-daemon $BUILD_FLAG
+echo -e "${BLUE}Starting Airflow 3.x services...${NC}"
+docker compose up -d airflow-postgres airflow-init
+sleep 15
+echo -e "${BLUE}Starting Airflow API Server, DAG Processor, Scheduler, and Triggerer...${NC}"
+docker compose up -d airflow-api-server airflow-dag-processor airflow-scheduler airflow-triggerer $BUILD_FLAG
+
+echo -e "${BLUE}Dagster is integrated into the backend service...${NC}"
 
 if [ "$NO_SPARK" = false ]; then
     echo -e "${BLUE}Starting Spark cluster...${NC}"
-    docker-compose up -d spark-master spark-worker-1 spark-worker-2
+    docker compose up -d spark-master spark-worker-1 spark-worker-2
 fi
 
 if [ "$NO_OLLAMA" = false ]; then
     echo -e "${BLUE}Starting Ollama LLM...${NC}"
-    docker-compose up -d ollama
+    docker compose up -d ollama
 fi
 
-echo -e "${BLUE}Starting NovaSight backend...${NC}"
-docker-compose up -d backend $BUILD_FLAG
+echo -e "${BLUE}Starting NovaSight backend (with integrated Dagster)...${NC}"
+docker compose up -d backend $BUILD_FLAG
 
 echo -e "${BLUE}Starting NovaSight frontend...${NC}"
-docker-compose up -d frontend $BUILD_FLAG
+docker compose up -d frontend $BUILD_FLAG
 
 echo ""
 echo -e "${BLUE}Waiting for all services to be healthy...${NC}"
@@ -127,7 +125,7 @@ echo ""
 echo "============================================"
 echo "Service Status"
 echo "============================================"
-docker-compose ps
+docker compose ps
 
 echo ""
 echo -e "${GREEN}============================================${NC}"
@@ -149,11 +147,11 @@ if [ "$NO_OLLAMA" = false ]; then
 fi
 echo ""
 echo "Default credentials:"
-echo "  - NovaSight: admin@novasight.dev / Admin123!"
+echo "  - NovaSight: admin@novasight.io / Admin123!"
 echo "  - Airflow:   airflow / airflow"
 echo ""
 echo "Useful commands:"
-echo "  - View logs:     docker-compose logs -f [service]"
-echo "  - Stop all:      docker-compose down"
-echo "  - Restart:       docker-compose restart [service]"
+echo "  - View logs:     docker compose logs -f [service]"
+echo "  - Stop all:      docker compose down"
+echo "  - Restart:       docker compose restart [service]"
 echo ""
