@@ -129,6 +129,11 @@ export function MarketingNavbar({ className }: MarketingNavbarProps) {
             to="/"
             className="flex items-center gap-2 text-xl font-bold"
           >
+            <img
+              src="/mobius_strip.png"
+              alt="NovaSight"
+              className="h-8 w-auto object-contain"
+            />
             <span className="bg-gradient-primary bg-clip-text text-transparent">
               NovaSight
             </span>

@@ -1,0 +1,9 @@
+version: 2
+sources:
+- name: tenant_raw
+  description: Raw data from tenant novasight_demo ClickHouse database
+  database: tenant_novasight_demo
+  schema: default
+  tables:
+  - name: '{{ table_name }}'
+    description: Auto-discovered table (placeholder)

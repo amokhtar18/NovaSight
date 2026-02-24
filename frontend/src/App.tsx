@@ -23,7 +23,7 @@ import { DagsListPage } from '@/pages/orchestration/DagsListPage'
 import { DagBuilderPage } from '@/pages/orchestration/DagBuilderPage'
 import { DagMonitorPage } from '@/pages/orchestration/DagMonitorPage'
 import { DagsterDashboardPage } from '@/pages/orchestration/DagsterDashboardPage'
-import { JobsListPage } from '@/pages/orchestration/JobsListPage'
+import { SchedulingPage } from '@/pages/orchestration/SchedulingPage'
 import { JobBuilderPage } from '@/pages/orchestration/JobBuilderPage'
 import { SparkConfigPage } from '@/pages/orchestration/SparkConfigPage'
 import { DataSourcesPage, DataSourceDetailPage } from '@/features/datasources'
@@ -104,15 +104,15 @@ function App() {
             <Route path="datasources" element={<DataSourcesPage />} />
             <Route path="datasources/:id" element={<DataSourceDetailPage />} />
             
-            {/* Orchestration - DAGs */}
-            <Route path="orchestration" element={<DagsterDashboardPage />} />
+            {/* Orchestration - Redirect to Scheduling */}
+            <Route path="orchestration" element={<Navigate to="/app/jobs" replace />} />
             <Route path="dags" element={<DagsListPage />} />
             <Route path="dags/new" element={<DagBuilderPage />} />
             <Route path="dags/:dagId/edit" element={<DagBuilderPage />} />
             <Route path="dags/:dagId/monitor" element={<DagMonitorPage />} />
             
-            {/* Spark Jobs - Unified Job Management */}
-            <Route path="jobs" element={<JobsListPage />} />
+            {/* Scheduling - Unified Job & Run Management */}
+            <Route path="jobs" element={<SchedulingPage />} />
             <Route path="jobs/new" element={<JobBuilderPage />} />
             <Route path="jobs/:jobId/edit" element={<JobBuilderPage />} />
             <Route path="jobs/spark-config" element={<SparkConfigPage />} />

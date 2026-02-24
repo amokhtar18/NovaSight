@@ -149,18 +149,18 @@ resources = {
     ),
     # Static Spark resource (uses environment config)
     "spark": SparkResource(
-        master=os.environ.get("SPARK_MASTER", "spark://spark-master:7077"),
+        master=os.environ.get("SPARK_MASTER_URL", "spark://spark-master:7077"),
         app_name="NovaSight",
     ),
     # Dynamic Spark resource (uses database config)
     "spark_dynamic": DynamicSparkResource(
-        fallback_master=os.environ.get("SPARK_MASTER", "spark://spark-master:7077"),
+        fallback_master=os.environ.get("SPARK_MASTER_URL", "spark://spark-master:7077"),
         fallback_app_name="NovaSight",
     ),
     # Remote Spark resource (for SSH-based spark-submit on remote servers)
     "spark_remote": DynamicRemoteSparkResource(
         ssh_host=os.environ.get("SPARK_SSH_HOST", ""),
-        spark_master=os.environ.get("SPARK_MASTER", "spark://spark-master:7077"),
+        spark_master=os.environ.get("SPARK_MASTER_URL", "spark://spark-master:7077"),
     ),
     # Static ClickHouse resource (uses environment config)
     "clickhouse": ClickHouseResource(

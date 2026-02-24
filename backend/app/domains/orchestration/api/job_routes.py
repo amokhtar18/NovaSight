@@ -105,17 +105,20 @@ def create_job():
     from app.domains.orchestration.application.unified_job_service import UnifiedJobService
     
     service = UnifiedJobService(tenant_id)
-    job_config = service.create_job(
-        pyspark_app_id=pyspark_app_id,
-        schedule=data.get("schedule"),
-        spark_config=data.get("spark_config"),
-        name=data.get("name"),
-        description=data.get("description"),
-        notifications=data.get("notifications"),
-        retries=data.get("retries", 2),
-        retry_delay_minutes=data.get("retry_delay_minutes", 5),
-        created_by=user_id,
-    )
+    try:
+        job_config = service.create_job(
+            pyspark_app_id=pyspark_app_id,
+            schedule=data.get("schedule"),
+            spark_config=data.get("spark_config"),
+            name=data.get("name"),
+            description=data.get("description"),
+            notifications=data.get("notifications"),
+            retries=data.get("retries", 2),
+            retry_delay_minutes=data.get("retry_delay_minutes", 5),
+            created_by=user_id,
+        )
+    except ValueError as e:
+        raise ValidationError(str(e))
     
     logger.info(f"Created Dagster job for PySpark app {pyspark_app_id}")
     
@@ -563,13 +566,24 @@ def test_spark_connection():
     Test connection to Spark cluster.
     
     Validates SSH connectivity and Spark master availability.
+    
+    Request Body (optional):
+        - spark_master: Spark master URL to test
+        - ssh_host: SSH host to test
+        - ssh_user: SSH user
+        - webui_port: Spark master web UI port
+        
+    If no body provided, tests the saved configuration.
     """
     identity = get_current_identity()
     tenant_id = identity.tenant_id
     
+    # Get optional custom config to test
+    data = request.get_json() or {}
+    
     from app.domains.orchestration.application.unified_job_service import UnifiedJobService
     
     service = UnifiedJobService(tenant_id)
-    result = service.test_spark_connection()
+    result = service.test_spark_connection(custom_config=data if data else None)
     
     return jsonify(result)

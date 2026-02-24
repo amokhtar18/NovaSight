@@ -77,7 +77,8 @@ class PySparkScheduleBuilder:
         
         # Build asset selection for this app's asset
         asset_name = f"pyspark_{app.name.lower().replace(' ', '_').replace('-', '_')}"
-        asset_key = ["pyspark", self.tenant_id, asset_name]
+        safe_tenant_id = self.tenant_id.replace('-', '_')
+        asset_key = ["pyspark", safe_tenant_id, asset_name]
         
         # Create job for the asset
         job = define_asset_job(

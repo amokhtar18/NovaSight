@@ -116,6 +116,7 @@ class PySparkAssetBuilder:
             group_name=group_name,
             compute_kind="spark",
             key_prefix=["pyspark", safe_tenant_id],
+            required_resource_keys={"spark_remote"},
             metadata={
                 "tenant_id": tenant_id,
                 "app_id": app_id,
@@ -137,8 +138,8 @@ class PySparkAssetBuilder:
             context.log.info(f"Starting PySpark job: {app_name}")
             context.log.info(f"Source: {source_table} -> Target: {target_table}")
             
-            # Get resources
-            spark = context.resources.spark_dynamic
+            # Get resources — use spark_remote for SSH-based submission
+            spark = context.resources.spark_remote
             
             try:
                 # 1. Generate code from template

@@ -135,11 +135,12 @@ class ClickHouseClient:
             self.password = password or config.get('CLICKHOUSE_PASSWORD', '')
             self.secure = secure or config.get('CLICKHOUSE_SECURE', False)
         except RuntimeError:
-            # Outside Flask context
-            self.host = host or 'localhost'
-            self.port = port or 9000
-            self.user = user or 'default'
-            self.password = password or ''
+            # Outside Flask context – read from env vars
+            import os
+            self.host = host or os.environ.get('CLICKHOUSE_HOST', 'localhost')
+            self.port = port or int(os.environ.get('CLICKHOUSE_PORT', 9000))
+            self.user = user or os.environ.get('CLICKHOUSE_USER', 'default')
+            self.password = password or os.environ.get('CLICKHOUSE_PASSWORD', '')
             self.secure = secure
         
         self.database = database or 'default'

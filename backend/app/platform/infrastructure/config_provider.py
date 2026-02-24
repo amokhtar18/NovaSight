@@ -102,8 +102,13 @@ class SparkConfig:
         self.dynamic_allocation = settings.get("dynamic_allocation", True)
         self.min_executors = settings.get("min_executors", 1)
         self.max_executors = settings.get("max_executors", 10)
+        self.num_executors = settings.get("num_executors", 2)
         self.spark_home = settings.get("spark_home", "/opt/spark")
         self.additional_configs = settings.get("additional_configs", {})
+        # Remote Spark server configuration
+        self.ssh_host = settings.get("ssh_host", "")
+        self.ssh_user = settings.get("ssh_user", "spark")
+        self.webui_port = settings.get("webui_port", 8080)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

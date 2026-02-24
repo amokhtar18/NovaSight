@@ -47,7 +47,7 @@ class UnifiedJobService:
     def _get_dagster_url(self) -> str:
         """Get Dagster webserver URL from environment."""
         import os
-        return os.environ.get("DAGSTER_URL", "http://dagster-webserver:3000")
+        return os.environ.get("DAGSTER_URL", "http://localhost:3000")
     
     # =========================================================================
     # Job CRUD Operations
@@ -119,6 +119,17 @@ class UnifiedJobService:
         if not name:
             safe_name = pyspark_app.name.lower().replace(" ", "_").replace("-", "_")
             name = f"spark_{safe_name}"
+        
+        # Check for duplicate dag_id
+        existing = DagConfig.query.filter(
+            DagConfig.tenant_id == self.tenant_id,
+            DagConfig.dag_id == name,
+        ).first()
+        if existing:
+            raise ValueError(
+                f"A job with the name '{name}' already exists. "
+                f"Please choose a different name or edit the existing job."
+            )
         
         # Determine schedule type
         schedule_type = ScheduleType.MANUAL
@@ -693,12 +704,13 @@ class UnifiedJobService:
             if config:
                 return {
                     "spark_master": config.master_url,
-                    "ssh_host": getattr(config, 'ssh_host', ''),
-                    "ssh_user": getattr(config, 'ssh_user', 'spark'),
+                    "ssh_host": config.ssh_host,
+                    "ssh_user": config.ssh_user,
+                    "webui_port": config.webui_port,
                     "driver_memory": config.driver_memory,
                     "executor_memory": config.executor_memory,
                     "executor_cores": config.executor_cores,
-                    "num_executors": getattr(config, 'num_executors', 2),
+                    "num_executors": config.num_executors,
                     "additional_configs": config.additional_configs or {},
                 }
         except Exception as e:
@@ -708,6 +720,7 @@ class UnifiedJobService:
             "spark_master": "spark://spark-master:7077",
             "ssh_host": "",
             "ssh_user": "spark",
+            "webui_port": 8080,
             "driver_memory": "2g",
             "executor_memory": "2g",
             "executor_cores": 2,
@@ -718,19 +731,88 @@ class UnifiedJobService:
     def update_spark_config(self, **kwargs) -> Dict[str, Any]:
         """Update Spark cluster configuration."""
         try:
-            from app.platform.infrastructure import InfrastructureConfigProvider
+            from app.domains.tenants.infrastructure.config_service import InfrastructureConfigService
+            import re
             
-            provider = InfrastructureConfigProvider()
-            config = provider.update_spark_config(**kwargs)
+            service = InfrastructureConfigService()
+            
+            # Get existing active spark config (global - tenant_id=None)
+            existing_config = service.get_active_config('spark', None)
+            
+            # Map kwargs to settings format
+            spark_master = kwargs.get('spark_master', 'spark://spark-master:7077')
+            
+            # Extract host and port from spark master URL
+            match = re.search(r'spark://([^:]+):(\d+)', spark_master)
+            if match:
+                host = match.group(1)
+                port = int(match.group(2))
+            else:
+                host = 'spark-master'
+                port = 7077
+            
+            settings = {
+                'master_url': spark_master,
+                'ssh_host': kwargs.get('ssh_host', ''),
+                'ssh_user': kwargs.get('ssh_user', 'spark'),
+                'webui_port': kwargs.get('webui_port', 8080),
+                'driver_memory': kwargs.get('driver_memory', '2g'),
+                'executor_memory': kwargs.get('executor_memory', '2g'),
+                'executor_cores': kwargs.get('executor_cores', 2),
+                'num_executors': kwargs.get('num_executors', 2),
+                'deploy_mode': kwargs.get('deploy_mode', 'client'),
+                'dynamic_allocation': kwargs.get('dynamic_allocation', True),
+                'min_executors': kwargs.get('min_executors', 1),
+                'max_executors': kwargs.get('max_executors', 10),
+                'spark_home': kwargs.get('spark_home', '/opt/spark'),
+                'additional_configs': kwargs.get('additional_configs', {}),
+            }
+            
+            if existing_config and not existing_config.is_system_default:
+                # Update existing config
+                service.update_config(
+                    config_id=str(existing_config.id),
+                    host=host,
+                    port=port,
+                    settings=settings,
+                    updated_by=None,  # System-level update
+                )
+            else:
+                # Create new global spark config
+                service.create_config(
+                    service_type='spark',
+                    name='Spark Cluster',
+                    host=host,
+                    port=port,
+                    settings=settings,
+                    tenant_id=None,  # Global config
+                    description='Global Spark cluster configuration',
+                    is_active=True,
+                    created_by=None,  # System-level creation
+                )
             
             return self.get_spark_config()
         except Exception as e:
             logger.error(f"Failed to update Spark config: {e}")
             raise
     
-    def test_spark_connection(self) -> Dict[str, Any]:
-        """Test connection to Spark cluster."""
-        config = self.get_spark_config()
+    def test_spark_connection(self, custom_config: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Test connection to Spark cluster.
+        
+        Args:
+            custom_config: Optional dict with custom values to test.
+                          If provided, uses these values instead of saved config.
+        """
+        # Use custom config if provided, otherwise get saved config
+        if custom_config:
+            config = {
+                "spark_master": custom_config.get("spark_master", ""),
+                "ssh_host": custom_config.get("ssh_host", ""),
+                "ssh_user": custom_config.get("ssh_user", "spark"),
+                "webui_port": custom_config.get("webui_port", 8080),
+            }
+        else:
+            config = self.get_spark_config()
         
         result = {
             "ssh_connection": False,
@@ -770,14 +852,15 @@ class UnifiedJobService:
         
         # Test Spark master (via REST API if available)
         spark_master = config.get("spark_master", "")
+        webui_port = config.get("webui_port", 8080)
         if "spark://" in spark_master:
-            # Extract host and check REST API port (usually 8080)
+            # Extract host and check REST API port
             import re
             match = re.search(r"spark://([^:]+):(\d+)", spark_master)
             if match:
                 host = match.group(1)
                 try:
-                    response = requests.get(f"http://{host}:8080/json/", timeout=10)
+                    response = requests.get(f"http://{host}:{webui_port}/json/", timeout=10)
                     result["spark_master"] = response.status_code == 200
                 except Exception as e:
                     result["errors"].append(f"Spark: {str(e)}")
@@ -816,21 +899,48 @@ class UnifiedJobService:
         return None
     
     def _register_job_with_dagster(self, dag: DagConfig) -> bool:
-        """Register job with Dagster (triggers code location reload)."""
-        # In a production setup, this would trigger a code location reload
-        # For now, just log the action
-        logger.info(f"Job registered with Dagster: {dag.dag_id}")
-        return True
+        """Register job with Dagster by triggering a code location reload."""
+        try:
+            response = requests.post(
+                f"{self._dagster_url}/graphql",
+                json={
+                    "query": """
+                        mutation ReloadLocation($locationName: String!) {
+                            reloadRepositoryLocation(
+                                repositoryLocationName: $locationName
+                            ) {
+                                __typename
+                                ... on WorkspaceLocationEntry {
+                                    name
+                                    loadStatus
+                                }
+                                ... on ReloadNotSupported {
+                                    message
+                                }
+                                ... on RepositoryLocationNotFound {
+                                    message
+                                }
+                            }
+                        }
+                    """,
+                    "variables": {"locationName": "novasight"},
+                },
+                timeout=30,
+            )
+            result = response.json()
+            logger.info(f"Dagster code location reload response: {result}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to reload Dagster code location: {e}")
+            return False
     
     def _update_job_in_dagster(self, dag: DagConfig) -> bool:
-        """Update job in Dagster."""
-        logger.info(f"Job updated in Dagster: {dag.dag_id}")
-        return True
+        """Update job in Dagster by reloading code location."""
+        return self._register_job_with_dagster(dag)
     
     def _remove_job_from_dagster(self, dag: DagConfig) -> bool:
-        """Remove job from Dagster."""
-        logger.info(f"Job removed from Dagster: {dag.dag_id}")
-        return True
+        """Remove job from Dagster by reloading code location."""
+        return self._register_job_with_dagster(dag)
     
     def _pause_dagster_schedule(self, dag: DagConfig) -> bool:
         """Pause schedule in Dagster."""

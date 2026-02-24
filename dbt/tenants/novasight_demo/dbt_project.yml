@@ -1,0 +1,35 @@
+name: novasight_novasight_demo
+version: 1.0.0
+config-version: 2
+profile: novasight_novasight_demo
+model-paths:
+- models
+analysis-paths:
+- analyses
+test-paths:
+- tests
+seed-paths:
+- seeds
+macro-paths:
+- macros
+snapshot-paths:
+- snapshots
+target-path: target
+clean-targets:
+- target
+- dbt_packages
+vars:
+  tenant_id: d37ec056-17f1-473a-8788-83051a68ba27
+  tenant_slug: novasight_demo
+  source_database: tenant_novasight_demo
+  target_database: dbt_tenant_novasight_demo
+models:
+  novasight_novasight_demo:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: ephemeral
+    marts:
+      +materialized: table
+      +schema: marts

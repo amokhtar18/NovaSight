@@ -15,12 +15,10 @@ import {
   Server,
   Building2,
   Upload,
-  CalendarClock,
   PieChart,
   LayoutDashboard,
   Sparkles,
-  Workflow,
-  Zap,
+  Calendar,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useState } from 'react'
@@ -33,11 +31,9 @@ const mainNavigation = [
 
 // Orchestrate your Data section
 const orchestrateNavigation = [
-  { name: 'Orchestration', href: '/app/orchestration', icon: Workflow },
   { name: 'Extract & Load', href: '/app/pyspark', icon: Upload },
-  { name: 'Spark Jobs', href: '/app/jobs', icon: Zap },
-  { name: 'Task Scheduler', href: '/app/dags', icon: CalendarClock },
-  { name: 'dbt Studio', href: '/app/dbt-studio', icon: GitBranch },
+  { name: 'Scheduling', href: '/app/jobs', icon: Calendar },
+  { name: 'Transform', href: '/app/dbt-studio', icon: GitBranch },
   { name: 'SQL Editor', href: '/app/sql', icon: Code2 },
   { name: 'Charts', href: '/app/charts', icon: PieChart },
   { name: 'Dashboards', href: '/app/dashboards', icon: LayoutDashboard },
@@ -48,7 +44,7 @@ const aiNavigation = {
   name: 'Ask AI',
   href: '/app/query',
   icon: Sparkles,
-  description: 'Natural language to SQL',
+  description: 'Natural Language to Insights',
 }
 
 // Administration section
@@ -107,9 +103,11 @@ export function Sidebar() {
       {/* Logo */}
       <div className="flex h-16 items-center border-b px-4">
         <Link to="/" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold">
-            N
-          </div>
+          <img
+            src="/mobius_strip.png"
+            alt="NovaSight"
+            className="h-8 w-auto object-contain"
+          />
           {!collapsed && (
             <span className="text-lg font-semibold">NovaSight</span>
           )}

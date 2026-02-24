@@ -163,8 +163,15 @@ class SparkSettingsSchema(Schema):
     max_executors = fields.Int(
         load_default=10, validate=validate.Range(min=1, max=500)
     )
+    num_executors = fields.Int(
+        load_default=2, validate=validate.Range(min=1, max=100)
+    )
     spark_home = fields.Str(load_default="/opt/spark")
     additional_configs = fields.Dict(load_default=dict)
+    # Remote Spark server configuration
+    ssh_host = fields.Str(load_default="", validate=validate.Length(max=255))
+    ssh_user = fields.Str(load_default="spark", validate=validate.Length(max=64))
+    webui_port = fields.Int(load_default=8080, validate=validate.Range(min=1, max=65535))
 
 
 class SparkConfigCreateSchema(BaseInfrastructureConfigSchema):

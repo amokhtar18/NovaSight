@@ -96,6 +96,7 @@ PUBLIC_PATH_PREFIXES = (
     "/api/v1/auth/refresh",
     "/api/v1/auth/forgot-password",
     "/api/v1/auth/reset-password",
+    "/api/v1/dagster/health",
 )
 
 

@@ -14,7 +14,7 @@ cohesive system that:
 ADR-002 Compliance: All generated code comes from pre-approved Jinja2 templates.
 """
 
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, Tuple
 from dagster import (
     job,
     op,
@@ -108,7 +108,104 @@ class DagsterJobBuilder:
         safe_tenant = self.tenant_id.replace('-', '_')
         job_name = f"spark_job_{safe_tenant}_{safe_name}"
         
-        # Build the job graph
+        # Build the job using closure-based ops with baked-in parameters.
+        # In Dagster's @job composition context, you cannot pass plain Python
+        # values — only outputs from other ops. We create unique ops per job
+        # that capture app_id and tenant_id via closure.
+        _app_id = app_id
+        _tenant_id = self.tenant_id
+        _spark_config = spark_config or {}
+
+        @op(name=f"{job_name}__generate_code", out={"code": Out(str), "code_hash": Out(str)})
+        def _generate_code(context: OpExecutionContext) -> Tuple[str, str]:
+            context.log.info(f"Generating PySpark code for app {_app_id}")
+            try:
+                import sys
+                if '/app' not in sys.path:
+                    sys.path.insert(0, '/app')
+                from app import create_app
+                from app.domains.compute.application.pyspark_app_service import PySparkAppService
+                flask_app = create_app()
+                with flask_app.app_context():
+                    service = PySparkAppService(_tenant_id)
+                    code, metadata = service.generate_code(_app_id)
+                    code_hash = metadata.get("parameters_hash", hashlib.sha256(code.encode()).hexdigest()[:16])
+                    context.log.info(f"Generated {len(code)} bytes, hash: {code_hash}")
+                    return code, code_hash
+            except Exception as e:
+                context.log.error(f"Code generation failed: {e}")
+                raise
+
+        @op(name=f"{job_name}__write_file", out=Out(str))
+        def _write_file(context: OpExecutionContext, code: str, code_hash: str) -> str:
+            jobs_dir = Path("/tmp/spark_jobs")
+            jobs_dir.mkdir(parents=True, exist_ok=True)
+            job_filename = f"{_app_id}_{code_hash}.py"
+            job_path = jobs_dir / job_filename
+            job_path.write_text(code)
+            context.log.info(f"Wrote job to: {job_path}")
+            return str(job_path)
+
+        @op(name=f"{job_name}__copy_remote", out=Out(str), required_resource_keys={"spark_remote"})
+        def _copy_remote(context: OpExecutionContext, local_path: str) -> str:
+            spark = context.resources.spark_remote
+            try:
+                remote_path = spark.copy_job_to_remote(local_path)
+                context.log.info(f"Copied job to remote: {remote_path}")
+                return remote_path
+            except Exception as e:
+                context.log.warning(f"Failed to copy to remote, assuming exists: {e}")
+                return f"/opt/spark/jobs/{Path(local_path).name}"
+
+        @op(
+            name=f"{job_name}__spark_submit",
+            out={"success": Out(bool), "application_id": Out(str), "duration_ms": Out(int), "stdout": Out(str), "stderr": Out(str)},
+            required_resource_keys={"spark_remote"},
+        )
+        def _spark_submit(context: OpExecutionContext, remote_path: str) -> Tuple[bool, str, int, str, str]:
+            context.log.info(f"Submitting Spark job: {remote_path}")
+            spark = context.resources.spark_remote
+            result = spark.submit_job(
+                app_path=remote_path,
+                app_args=["--app-id", _app_id],
+                spark_config=_spark_config,
+                copy_to_remote=False,
+            )
+            success = result.get("success", False)
+            app_id_result = result.get("application_id", "unknown")
+            duration_ms = result.get("duration_ms", 0)
+            stdout = result.get("stdout", "")
+            stderr = result.get("stderr", "")
+            if not success:
+                context.log.error(f"Spark job failed: {stderr[:500]}")
+                raise Exception(f"Spark job failed: {stderr[:200]}")
+            context.log.info(f"Spark job completed: app_id={app_id_result}, duration={duration_ms}ms")
+            return success, app_id_result, duration_ms, stdout, stderr
+
+        @op(name=f"{job_name}__update_stats")
+        def _update_stats(context: OpExecutionContext, success: bool, application_id: str, duration_ms: int, stdout: str, stderr: str) -> None:
+            try:
+                import sys
+                if '/app' not in sys.path:
+                    sys.path.insert(0, '/app')
+                from app import create_app
+                from app.extensions import db as flask_db
+                from app.domains.compute.domain.models import PySparkApp
+                flask_app = create_app()
+                with flask_app.app_context():
+                    pyspark_app = PySparkApp.query.get(_app_id)
+                    if pyspark_app:
+                        pyspark_app.last_run_at = datetime.utcnow()
+                        pyspark_app.last_run_status = "success" if success else "failed"
+                        pyspark_app.last_run_duration_ms = duration_ms
+                        rows = _parse_rows_from_output(stdout)
+                        if rows:
+                            pyspark_app.last_run_rows = rows
+                        flask_db.session.commit()
+                        context.log.info(f"Updated stats for {_app_id}: {pyspark_app.last_run_status}")
+            except Exception as e:
+                context.log.warning(f"Failed to update stats: {e}")
+
         @job(
             name=job_name,
             tags={
@@ -121,11 +218,11 @@ class DagsterJobBuilder:
             description=f"PySpark extraction job: {app_config.source_table} -> {app_config.target_table}",
         )
         def _spark_job():
-            code_result = generate_pyspark_code(app_id, self.tenant_id)
-            write_result = write_job_to_file(code_result, app_id)
-            copy_result = copy_to_remote_spark(write_result, app_id)
-            submit_result = execute_remote_spark_submit(copy_result, app_id, spark_config or {})
-            update_stats(submit_result, app_id, self.tenant_id)
+            code, code_hash = _generate_code()
+            local_path = _write_file(code, code_hash)
+            remote_path = _copy_remote(local_path)
+            success, application_id, duration_ms, stdout, stderr = _spark_submit(remote_path)
+            _update_stats(success, application_id, duration_ms, stdout, stderr)
         
         self._jobs.append(_spark_job)
         
@@ -314,7 +411,7 @@ class DagsterJobBuilder:
         "code_hash": Out(str, description="Hash of the generated code"),
     },
 )
-def generate_pyspark_code(context: OpExecutionContext, app_id: str, tenant_id: str) -> tuple:
+def generate_pyspark_code(context: OpExecutionContext, app_id: str, tenant_id: str) -> Tuple[str, str]:
     """Generate PySpark code from template using the template engine."""
     context.log.info(f"Generating PySpark code for app {app_id}")
     
@@ -405,7 +502,7 @@ def execute_remote_spark_submit(
     app_id: str,
     spark_config: Dict[str, Any],
     depends_on: Optional[Any] = None,
-) -> tuple:
+) -> Tuple[bool, str, int, str, str]:
     """Execute spark-submit on the remote Spark cluster."""
     context.log.info(f"Submitting Spark job: {remote_path}")
     
@@ -574,7 +671,7 @@ def load_all_dagster_jobs() -> List[JobDefinition]:
                     dag_config = DagConfig.query.filter(
                         DagConfig.tenant_id == tenant_id,
                         DagConfig.tags.contains([str(pyspark_app.id)]),
-                        DagConfig.status.in_([DagStatus.ACTIVE]),
+                        DagConfig.status.in_([DagStatus.ACTIVE, DagStatus.DRAFT]),
                     ).first()
                     
                     schedule_cron = None
@@ -607,14 +704,14 @@ def load_all_schedules() -> List[ScheduleDefinition]:
             sys.path.insert(0, '/app')
         
         from app import create_app
-        from app.domains.orchestration.domain.models import DagConfig, DagStatus
+        from app.domains.orchestration.domain.models import DagConfig, DagStatus, ScheduleType
         
         app = create_app()
         with app.app_context():
             # Get all active DAGs with cron schedules
             active_dags = DagConfig.query.filter(
                 DagConfig.status == DagStatus.ACTIVE,
-                DagConfig.schedule_type == "cron",
+                DagConfig.schedule_type == ScheduleType.CRON,
             ).all()
             
             for dag in active_dags:

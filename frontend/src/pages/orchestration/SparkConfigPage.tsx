@@ -37,6 +37,7 @@ export function SparkConfigPage() {
   const [sparkMaster, setSparkMaster] = useState('')
   const [sshHost, setSshHost] = useState('')
   const [sshUser, setSshUser] = useState('spark')
+  const [webuiPort, setWebuiPort] = useState(8080)
   const [driverMemory, setDriverMemory] = useState('2g')
   const [executorMemory, setExecutorMemory] = useState('2g')
   const [executorCores, setExecutorCores] = useState(2)
@@ -55,6 +56,7 @@ export function SparkConfigPage() {
       setSparkMaster(config.spark_master)
       setSshHost(config.ssh_host || '')
       setSshUser(config.ssh_user || 'spark')
+      setWebuiPort(config.webui_port || 8080)
       setDriverMemory(config.driver_memory)
       setExecutorMemory(config.executor_memory)
       setExecutorCores(config.executor_cores)
@@ -85,6 +87,7 @@ export function SparkConfigPage() {
         spark_master: sparkMaster,
         ssh_host: sshHost,
         ssh_user: sshUser,
+        webui_port: webuiPort,
         driver_memory: driverMemory,
         executor_memory: executorMemory,
         executor_cores: executorCores,
@@ -110,7 +113,12 @@ export function SparkConfigPage() {
 
   // Test connection mutation
   const testMutation = useMutation({
-    mutationFn: () => jobService.testSparkConnection(),
+    mutationFn: () => jobService.testSparkConnection({
+      spark_master: sparkMaster,
+      ssh_host: sshHost,
+      ssh_user: sshUser,
+      webui_port: webuiPort,
+    }),
     onSuccess: (result) => {
       if (result.success) {
         toast({
@@ -243,6 +251,21 @@ export function SparkConfigPage() {
             />
             <p className="text-xs text-muted-foreground">
               Examples: spark://host:7077, yarn, k8s://https://kubernetes
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="webuiPort">Spark Master Web UI Port</Label>
+            <Input
+              id="webuiPort"
+              type="number"
+              min={1}
+              max={65535}
+              value={webuiPort}
+              onChange={(e) => setWebuiPort(parseInt(e.target.value) || 8080)}
+              placeholder="8080"
+            />
+            <p className="text-xs text-muted-foreground">
+              The port used by Spark Master's REST API for connection testing (default: 8080)
             </p>
           </div>
         </CardContent>

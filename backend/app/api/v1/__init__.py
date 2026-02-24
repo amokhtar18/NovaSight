@@ -22,10 +22,12 @@ from app.domains.datasources.api import connection_routes  # noqa: F401
 
 # Orchestration domain routes (canonical)
 from app.domains.orchestration.api import dag_routes  # noqa: F401
+from app.domains.orchestration.api import job_routes  # noqa: F401
 from app.domains.orchestration.api.dagster_proxy import dagster_proxy_bp  # noqa: F401
 
 # Analytics domain routes (canonical)
 from app.domains.analytics.api import dashboard_routes  # noqa: F401
+from app.domains.analytics.api import chart_routes  # noqa: F401
 
 # Transformation domain routes (canonical)
 from app.domains.transformation.api import semantic_routes  # noqa: F401

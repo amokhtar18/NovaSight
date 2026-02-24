@@ -619,7 +619,7 @@ class DagsterGraphQLClient {
 
     // Add auth token if using proxy
     if (this.useProxy) {
-      const token = localStorage.getItem('access_token');
+      const token = localStorage.getItem('novasight_access_token');
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }

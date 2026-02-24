@@ -69,6 +69,7 @@ export interface SparkConfig {
   spark_master: string
   ssh_host?: string
   ssh_user?: string
+  webui_port?: number
   driver_memory: string
   executor_memory: string
   executor_cores: number
@@ -253,7 +254,12 @@ class JobService {
     return response.data.config
   }
 
-  async testSparkConnection(): Promise<{
+  async testSparkConnection(config?: {
+    spark_master?: string
+    ssh_host?: string
+    ssh_user?: string
+    webui_port?: number
+  }): Promise<{
     success: boolean
     ssh_connection: boolean | null
     spark_master: boolean
@@ -264,7 +270,7 @@ class JobService {
       ssh_connection: boolean | null
       spark_master: boolean
       errors: string[]
-    }>(`${this.baseUrl}/spark-config/test`)
+    }>(`${this.baseUrl}/spark-config/test`, config || {})
     return response.data
   }
 }

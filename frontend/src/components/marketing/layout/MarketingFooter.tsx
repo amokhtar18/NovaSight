@@ -85,7 +85,12 @@ export function MarketingFooter({ className }: MarketingFooterProps) {
           {/* Brand & Newsletter */}
           <div className="space-y-8 xl:col-span-1">
             <Link to="/" className="inline-block">
-              <span className="text-2xl font-bold">
+              <span className="flex items-center gap-2 text-2xl font-bold">
+                <img
+                  src="/mobius_strip.png"
+                  alt="NovaSight"
+                  className="h-8 w-auto object-contain"
+                />
                 <span className="bg-gradient-primary bg-clip-text text-transparent">
                   NovaSight
                 </span>

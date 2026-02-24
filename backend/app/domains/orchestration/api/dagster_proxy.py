@@ -9,7 +9,7 @@ import requests
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required
 
-dagster_proxy_bp = Blueprint('dagster_proxy', __name__, url_prefix='/api/v1/dagster')
+dagster_proxy_bp = Blueprint('dagster_proxy', __name__, url_prefix='/dagster')
 
 
 def get_dagster_url() -> str:
