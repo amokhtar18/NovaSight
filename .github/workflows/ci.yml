@@ -5,11 +5,14 @@
 
 name: CI
 
+# PAUSED - Re-enable triggers below to resume
+# on:
+#   push:
+#     branches: [main, develop]
+#   pull_request:
+#     branches: [main, develop]
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
+  workflow_dispatch: # Manual trigger only while paused
 
 env:
   PYTHON_VERSION: '3.11'

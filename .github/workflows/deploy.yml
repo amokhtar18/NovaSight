@@ -4,24 +4,27 @@
 
 name: Deploy
 
+# PAUSED - Re-enable triggers below to resume
+# on:
+#   push:
+#     branches: [main]
+#   workflow_dispatch:
+#     inputs:
+#       environment:
+#         description: 'Environment to deploy to'
+#         required: true
+#         default: 'staging'
+#         type: choice
+#         options:
+#           - staging
+#           - production
+#       skip_tests:
+#         description: 'Skip running tests before deployment'
+#         required: false
+#         default: false
+#         type: boolean
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy to'
-        required: true
-        default: 'staging'
-        type: choice
-        options:
-          - staging
-          - production
-      skip_tests:
-        description: 'Skip running tests before deployment'
-        required: false
-        default: false
-        type: boolean
+  workflow_dispatch: # Manual trigger only while paused
 
 env:
   REGISTRY: ghcr.io

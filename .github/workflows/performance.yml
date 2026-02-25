@@ -1,29 +1,32 @@
 name: Performance Tests
 
+# PAUSED - Re-enable triggers below to resume
+# on:
+#   schedule:
+#     # Run daily at 2 AM UTC
+#     - cron: '0 2 * * *'
+#   workflow_dispatch:
+#     inputs:
+#       test_type:
+#         description: 'Type of performance test to run'
+#         required: true
+#         default: 'load'
+#         type: choice
+#         options:
+#           - load
+#           - stress
+#           - spike
+#           - database
+#       environment:
+#         description: 'Target environment'
+#         required: true
+#         default: 'staging'
+#         type: choice
+#         options:
+#           - staging
+#           - production
 on:
-  schedule:
-    # Run daily at 2 AM UTC
-    - cron: '0 2 * * *'
-  workflow_dispatch:
-    inputs:
-      test_type:
-        description: 'Type of performance test to run'
-        required: true
-        default: 'load'
-        type: choice
-        options:
-          - load
-          - stress
-          - spike
-          - database
-      environment:
-        description: 'Target environment'
-        required: true
-        default: 'staging'
-        type: choice
-        options:
-          - staging
-          - production
+  workflow_dispatch: # Manual trigger only while paused
 
 env:
   API_URL: ${{ secrets.STAGING_API_URL || 'http://localhost:5000' }}
