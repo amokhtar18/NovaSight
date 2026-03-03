@@ -3,6 +3,42 @@ import { authService } from './authService'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || ''
 
+/**
+ * Custom error class that extracts error messages from API responses.
+ */
+class ApiError extends Error {
+  status: number
+  code?: string
+  
+  constructor(message: string, status: number, code?: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+  }
+}
+
+/**
+ * Extract error message from Axios error response.
+ */
+function extractErrorMessage(error: AxiosError): string {
+  if (error.response?.data) {
+    const data = error.response.data as Record<string, unknown>
+    // Try common error response formats
+    if (typeof data.message === 'string') return data.message
+    if (typeof data.error === 'string') return data.error
+    if (typeof data.detail === 'string') return data.detail
+    if (Array.isArray(data.errors) && data.errors.length > 0) {
+      return data.errors.map((e) => (typeof e === 'string' ? e : e.message || e.msg)).join(', ')
+    }
+    // Fallback to stringifying the response
+    if (Object.keys(data).length > 0) {
+      return JSON.stringify(data)
+    }
+  }
+  return error.message || 'An unexpected error occurred'
+}
+
 class ApiClient {
   private client: AxiosInstance
   private isRefreshing = false
@@ -71,7 +107,11 @@ class ApiClient {
           }
         }
 
-        return Promise.reject(error)
+        // Transform error to include server message
+        const message = extractErrorMessage(error)
+        const status = error.response?.status || 0
+        const code = (error.response?.data as Record<string, unknown>)?.code as string | undefined
+        return Promise.reject(new ApiError(message, status, code))
       }
     )
   }
@@ -93,3 +133,4 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient().instance
+export { ApiError }

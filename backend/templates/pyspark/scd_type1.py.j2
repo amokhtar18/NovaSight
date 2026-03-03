@@ -189,14 +189,14 @@ ENGINE = {engine}(_novasight_updated_at)
         Creates the table if it doesn't exist, using the column type mappings
         derived from the source database types.
         """
-        import clickhouse_connect
-        
         target_url = os.getenv("CLICKHOUSE_HOST", "clickhouse")
         target_port = int(os.getenv("CLICKHOUSE_PORT", "8123"))
         target_user = os.getenv("CLICKHOUSE_USER", "default")
         target_password = os.getenv("CLICKHOUSE_PASSWORD", "")
         
         try:
+            import clickhouse_connect
+            
             client = clickhouse_connect.get_client(
                 host=target_url,
                 port=target_port,

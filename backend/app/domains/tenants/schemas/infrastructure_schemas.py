@@ -73,9 +73,9 @@ class BaseInfrastructureConfigSchema(Schema):
         load_default=dict,
         metadata={"description": "Service-specific settings"},
     )
-    created_at = fields.DateTime(dump_only=True)
-    updated_at = fields.DateTime(dump_only=True)
-    last_test_at = fields.DateTime(dump_only=True)
+    created_at = fields.Str(dump_only=True)
+    updated_at = fields.Str(dump_only=True)
+    last_test_at = fields.Str(dump_only=True, allow_none=True)
     last_test_success = fields.Bool(dump_only=True)
     last_test_message = fields.Str(dump_only=True)
 

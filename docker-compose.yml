@@ -360,14 +360,20 @@ services:
   # Apache Spark - Distributed Processing
   # ============================================
   spark-master:
-    image: ${SPARK_IMAGE:-apache/spark:3.5.4}
+    build:
+      context: .
+      dockerfile: docker/spark/Dockerfile
+      args:
+        SPARK_IMAGE: ${SPARK_IMAGE:-apache/spark:3.5.4}
     container_name: ${SPARK_MASTER_CONTAINER:-novasight-spark-master}
     restart: unless-stopped
     ports:
-      - "8081:${SPARK_MASTER_WEBUI_PORT:-8080}"   # Spark Master Web UI
+      - "8080:${SPARK_MASTER_WEBUI_PORT:-8080}"   # Spark Master Web UI
       - "${SPARK_MASTER_PORT:-7077}:7077"          # Spark Master port
+      - "6066:6066"                                # Spark REST Submission API
     environment:
       SPARK_NO_DAEMONIZE: "true"
+      SPARK_MASTER_OPTS: "-Dspark.master.rest.enabled=true -Dspark.master.rest.port=6066"
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     volumes:
       - spark_data:/opt/spark/work
@@ -382,7 +388,11 @@ services:
       - novasight-network
 
   spark-worker-1:
-    image: ${SPARK_IMAGE:-apache/spark:3.5.4}
+    build:
+      context: .
+      dockerfile: docker/spark/Dockerfile
+      args:
+        SPARK_IMAGE: ${SPARK_IMAGE:-apache/spark:3.5.4}
     container_name: novasight-spark-worker-1
     restart: unless-stopped
     depends_on:
@@ -399,7 +409,11 @@ services:
       - novasight-network
 
   spark-worker-2:
-    image: ${SPARK_IMAGE:-apache/spark:3.5.4}
+    build:
+      context: .
+      dockerfile: docker/spark/Dockerfile
+      args:
+        SPARK_IMAGE: ${SPARK_IMAGE:-apache/spark:3.5.4}
     container_name: novasight-spark-worker-2
     restart: unless-stopped
     depends_on:
@@ -457,6 +471,9 @@ services:
       AIRFLOW_PASSWORD: airflow
       SPARK_MASTER_URL: ${SPARK_MASTER_URL:-spark://spark-master:7077}
       SPARK_SSH_HOST: ${SPARK_SSH_HOST:-}
+      SPARK_EXECUTION_MODE: ${SPARK_EXECUTION_MODE:-docker}
+      SPARK_MASTER_CONTAINER: ${SPARK_MASTER_CONTAINER:-novasight-spark-master}
+      SPARK_REST_URL: ${SPARK_REST_URL:-http://spark-master:6066}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       SECRET_KEY: dev-secret-key-change-in-production
       JWT_SECRET_KEY: jwt-dev-secret-key-change-in-production

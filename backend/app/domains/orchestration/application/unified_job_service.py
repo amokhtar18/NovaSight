@@ -120,10 +120,11 @@ class UnifiedJobService:
             safe_name = pyspark_app.name.lower().replace(" ", "_").replace("-", "_")
             name = f"spark_{safe_name}"
         
-        # Check for duplicate dag_id
+        # Check for duplicate dag_id (exclude archived/deleted jobs)
         existing = DagConfig.query.filter(
             DagConfig.tenant_id == self.tenant_id,
             DagConfig.dag_id == name,
+            DagConfig.status != DagStatus.ARCHIVED,
         ).first()
         if existing:
             raise ValueError(
@@ -205,6 +206,19 @@ class UnifiedJobService:
         
         # Generate safe name
         safe_name = name.lower().replace(" ", "_").replace("-", "_")
+        dag_id = f"pipeline_{safe_name}"
+        
+        # Check for duplicate dag_id (exclude archived/deleted jobs)
+        existing = DagConfig.query.filter(
+            DagConfig.tenant_id == self.tenant_id,
+            DagConfig.dag_id == dag_id,
+            DagConfig.status != DagStatus.ARCHIVED,
+        ).first()
+        if existing:
+            raise ValueError(
+                f"A pipeline with the name '{name}' already exists. "
+                f"Please choose a different name or edit the existing pipeline."
+            )
         
         # Determine schedule type
         schedule_type = ScheduleType.MANUAL
@@ -222,7 +236,7 @@ class UnifiedJobService:
         # Create the DagConfig
         dag_config = DagConfig(
             tenant_id=self.tenant_id,
-            dag_id=f"pipeline_{safe_name}",
+            dag_id=dag_id,
             description=description or f"Pipeline executing {len(apps)} PySpark jobs",
             schedule_type=schedule_type,
             schedule_cron=schedule_cron,

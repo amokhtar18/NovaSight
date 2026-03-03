@@ -7,8 +7,15 @@ Allows portal admins to configure ClickHouse, Spark, and Ollama connections.
 """
 
 from flask import request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from app.api.v1.admin import admin_bp
+from app.platform.auth.jwt_handler import get_jwt_identity_dict
+
+
+def _get_user_id() -> str:
+    """Extract user_id from JWT identity."""
+    identity = get_jwt_identity_dict()
+    return identity.get("user_id", "")
 from app.services.infrastructure_config_service import (
     InfrastructureConfigService,
     InfrastructureConfigError,
@@ -178,7 +185,7 @@ def create_infrastructure_config():
     except MarshmallowValidationError as e:
         raise ValidationError(str(e.messages))
     
-    current_user_id = get_jwt_identity()
+    current_user_id = _get_user_id()
     service = InfrastructureConfigService()
     
     try:
@@ -233,7 +240,7 @@ def update_infrastructure_config(config_id):
     except MarshmallowValidationError as e:
         raise ValidationError(str(e.messages))
     
-    current_user_id = get_jwt_identity()
+    current_user_id = _get_user_id()
     service = InfrastructureConfigService()
     
     try:
@@ -268,7 +275,7 @@ def delete_infrastructure_config(config_id):
     Returns:
         Success message
     """
-    current_user_id = get_jwt_identity()
+    current_user_id = _get_user_id()
     service = InfrastructureConfigService()
     
     try:
@@ -351,7 +358,7 @@ def activate_infrastructure_config(config_id):
     Returns:
         Updated configuration details
     """
-    current_user_id = get_jwt_identity()
+    current_user_id = _get_user_id()
     service = InfrastructureConfigService()
     
     try:
@@ -469,7 +476,7 @@ def create_tenant_clickhouse_config(tenant_id):
     if not tenant:
         raise NotFoundError(f'Tenant not found: {tenant_id}')
     
-    current_user_id = get_jwt_identity()
+    current_user_id = _get_user_id()
     service = InfrastructureConfigService()
     
     try:
@@ -529,7 +536,7 @@ def update_tenant_clickhouse_config(tenant_id):
     if not config or str(config.tenant_id) != str(tenant_id):
         raise NotFoundError(f'No ClickHouse configuration found for tenant {tenant_id}')
     
-    current_user_id = get_jwt_identity()
+    current_user_id = _get_user_id()
     
     try:
         updated_config = service.update_config(
@@ -575,7 +582,7 @@ def delete_tenant_clickhouse_config(tenant_id):
     if not configs['items']:
         raise NotFoundError(f'No ClickHouse configuration found for tenant {tenant_id}')
     
-    current_user_id = get_jwt_identity()
+    current_user_id = _get_user_id()
     
     # Delete all tenant-specific ClickHouse configs
     from app.domains.tenants.domain.models import InfrastructureConfig
@@ -716,7 +723,7 @@ def create_global_spark_config():
     except MarshmallowValidationError as e:
         raise ValidationError(str(e.messages))
     
-    current_user_id = get_jwt_identity()
+    current_user_id = _get_user_id()
     service = InfrastructureConfigService()
     
     try:
@@ -774,7 +781,7 @@ def update_global_spark_config():
     if not config:
         raise NotFoundError('No global Spark configuration found. Create one first.')
     
-    current_user_id = get_jwt_identity()
+    current_user_id = _get_user_id()
     
     try:
         updated_config = service.update_config(

@@ -154,8 +154,17 @@ class DagsterJobBuilder:
                 context.log.info(f"Copied job to remote: {remote_path}")
                 return remote_path
             except Exception as e:
-                context.log.warning(f"Failed to copy to remote, assuming exists: {e}")
-                return f"/opt/spark/jobs/{Path(local_path).name}"
+                context.log.warning(f"Failed to copy to remote: {e}")
+                # Fallback: copy to the shared volume manually
+                import shutil
+                dest = f"/opt/spark/jobs/{Path(local_path).name}"
+                try:
+                    Path("/opt/spark/jobs").mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(local_path, dest)
+                    context.log.info(f"Fallback copy to shared volume: {dest}")
+                except Exception as copy_err:
+                    context.log.error(f"Fallback copy also failed: {copy_err}")
+                return dest
 
         @op(
             name=f"{job_name}__spark_submit",
