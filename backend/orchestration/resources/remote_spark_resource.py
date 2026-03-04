@@ -947,6 +947,10 @@ class DynamicRemoteSparkResource(RemoteSparkResource):
                         )
                 
                 # Build comprehensive config from DB
+                # Derive REST URL from infra config host (port 6066)
+                infra_host = config.host or "spark-master"
+                spark_rest_url = f"http://{infra_host}:6066"
+                
                 return {
                     "spark_master": config.master_url,
                     "driver_memory": config.driver_memory,
@@ -965,9 +969,7 @@ class DynamicRemoteSparkResource(RemoteSparkResource):
                     "docker_container": os.environ.get(
                         "SPARK_MASTER_CONTAINER", "novasight-spark-master"
                     ),
-                    "spark_rest_url": os.environ.get(
-                        "SPARK_REST_URL", "http://spark-master:6066"
-                    ),
+                    "spark_rest_url": spark_rest_url,
                 }
         except Exception as e:
             logger.warning(f"Failed to get dynamic Spark config: {e}")
