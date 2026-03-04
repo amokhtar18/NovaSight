@@ -29,7 +29,6 @@ from dagster import (
     ScheduleDefinition,
     JobDefinition,
     GraphDefinition,
-    Definitions,
     RunRequest,
     SkipReason,
     sensor,
@@ -395,17 +394,17 @@ class DagsterJobBuilder:
         
         return _schedule
     
-    def get_definitions(self) -> Definitions:
-        """Get all Dagster definitions (jobs, schedules, sensors)."""
-        from orchestration.resources.remote_spark_resource import DynamicRemoteSparkResource
+    def get_definitions(self):
+        """Get all Dagster definitions (jobs, schedules, sensors).
         
-        return Definitions(
-            jobs=self._jobs,
-            schedules=self._schedules,
-            sensors=self._sensors,
-            resources={
-                "spark_remote": DynamicRemoteSparkResource(),
-            },
+        NOTE: This method is intentionally unused. Jobs are loaded via
+        load_all_dagster_jobs() and merged into the main definitions.py.
+        Resource configuration lives exclusively in definitions.py to
+        ensure a single source of truth for Spark cluster connection.
+        """
+        raise NotImplementedError(
+            "Do not use get_definitions(). Jobs are loaded via "
+            "load_all_dagster_jobs() into the main Definitions in definitions.py."
         )
 
 

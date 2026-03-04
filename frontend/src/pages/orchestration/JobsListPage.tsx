@@ -52,7 +52,6 @@ import {
   GitBranch,
   Search,
   RefreshCw,
-  Server,
   ArrowRight,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
@@ -228,12 +227,6 @@ export function JobsListPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" asChild>
-            <Link to="/app/jobs/spark-config">
-              <Server className="mr-2 h-4 w-4" />
-              Spark Config
-            </Link>
-          </Button>
           <Button asChild>
             <Link to="/app/jobs/new">
               <Plus className="mr-2 h-4 w-4" />

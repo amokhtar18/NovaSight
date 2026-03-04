@@ -39,6 +39,8 @@ import {
   GitBranch,
   Info,
   CheckCircle,
+  Cpu,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { toast } from '@/components/ui/use-toast'
 
@@ -71,6 +73,13 @@ export function JobBuilderPage() {
   const [notifyOnFailure, _setNotifyOnFailure] = useState(true) // TODO: Implement UI
   const [notifyOnSuccess, _setNotifyOnSuccess] = useState(false) // TODO: Implement UI
   const [notificationEmails, _setNotificationEmails] = useState('') // TODO: Implement UI
+
+  // Resource configuration (per-job Spark resource allocation)
+  const [driverMemory, setDriverMemory] = useState('2g')
+  const [executorMemory, setExecutorMemory] = useState('2g')
+  const [executorCores, setExecutorCores] = useState(2)
+  const [numExecutors, setNumExecutors] = useState(2)
+  const [additionalConfigs, setAdditionalConfigs] = useState('')
 
   // Load PySpark apps
   const { data: appsData, isLoading: loadingApps } = useQuery({
@@ -134,6 +143,22 @@ export function JobBuilderPage() {
           ? schedulePreset
           : cronExpression
 
+      // Build per-job spark resource config
+      const additionalConfigsObj: Record<string, string> = {}
+      additionalConfigs.split('\n').forEach((line) => {
+        const [key, ...rest] = line.split('=')
+        if (key?.trim() && rest.length > 0) {
+          additionalConfigsObj[key.trim()] = rest.join('=').trim()
+        }
+      })
+      const sparkResourceConfig: Record<string, unknown> = {
+        driver_memory: driverMemory,
+        executor_memory: executorMemory,
+        executor_cores: executorCores,
+        num_executors: numExecutors,
+        ...(Object.keys(additionalConfigsObj).length > 0 && { additional_configs: additionalConfigsObj }),
+      }
+
       if (jobType === 'spark') {
         const data: CreateJobRequest = {
           pyspark_app_id: selectedAppId,
@@ -142,6 +167,7 @@ export function JobBuilderPage() {
           schedule,
           retries,
           retry_delay_minutes: retryDelay,
+          spark_config: sparkResourceConfig,
           notifications: {
             emails: notificationEmails.split(',').map((e) => e.trim()).filter(Boolean),
             on_failure: notifyOnFailure,
@@ -160,6 +186,7 @@ export function JobBuilderPage() {
           description,
           schedule,
           parallel,
+          spark_config: sparkResourceConfig,
         }
 
         if (isEditing) {
@@ -469,6 +496,96 @@ export function JobBuilderPage() {
               <CronBuilder value={cronExpression} onChange={setCronExpression} />
             </TabsContent>
           </Tabs>
+        </CardContent>
+      </Card>
+
+      {/* Resource Configuration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Cpu className="h-5 w-5" />
+            Resource Configuration
+          </CardTitle>
+          <CardDescription>
+            Configure Spark resource allocation for this job. These override the global defaults.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="driverMemory">Driver Memory</Label>
+              <Input
+                id="driverMemory"
+                value={driverMemory}
+                onChange={(e) => setDriverMemory(e.target.value)}
+                placeholder="2g"
+              />
+              <p className="text-xs text-muted-foreground">e.g. 1g, 2g, 4g, 512m</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="executorMemory">Executor Memory</Label>
+              <Input
+                id="executorMemory"
+                value={executorMemory}
+                onChange={(e) => setExecutorMemory(e.target.value)}
+                placeholder="2g"
+              />
+              <p className="text-xs text-muted-foreground">e.g. 1g, 2g, 4g, 512m</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="executorCores">Executor Cores</Label>
+              <Input
+                id="executorCores"
+                type="number"
+                min={1}
+                max={32}
+                value={executorCores}
+                onChange={(e) => setExecutorCores(parseInt(e.target.value) || 1)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="numExecutors">Number of Executors</Label>
+              <Input
+                id="numExecutors"
+                type="number"
+                min={1}
+                max={100}
+                value={numExecutors}
+                onChange={(e) => setNumExecutors(parseInt(e.target.value) || 1)}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Advanced Configuration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <SlidersHorizontal className="h-5 w-5" />
+            Advanced Configuration
+          </CardTitle>
+          <CardDescription>
+            Additional Spark configuration properties (optional)
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            <Label htmlFor="additionalConfigs">Additional Spark Configs</Label>
+            <Textarea
+              id="additionalConfigs"
+              value={additionalConfigs}
+              onChange={(e) => setAdditionalConfigs(e.target.value)}
+              placeholder={"spark.sql.shuffle.partitions=200\nspark.serializer=org.apache.spark.serializer.KryoSerializer"}
+              rows={4}
+              className="font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              One config per line in key=value format. These are passed as --conf to spark-submit.
+            </p>
+          </div>
         </CardContent>
       </Card>
 

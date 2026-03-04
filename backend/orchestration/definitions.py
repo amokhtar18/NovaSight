@@ -16,11 +16,9 @@ from dagster_dbt import DbtCliResource
 import os
 import logging
 
-from orchestration.resources.spark_resource import SparkResource, DynamicSparkResource
 from orchestration.resources.clickhouse_resource import ClickHouseResource, DynamicClickHouseResource
 from orchestration.resources.database_resource import DatabaseResource
 from orchestration.resources.remote_spark_resource import (
-    RemoteSparkResource,
     DynamicRemoteSparkResource,
 )
 from orchestration.assets.pyspark_builder import load_all_pyspark_assets
@@ -141,23 +139,18 @@ all_schedules.extend(job_schedules)
 logger.info(f"Loaded {len(job_schedules)} job schedules")
 
 # Resource definitions
-# Static resources (for backwards compatibility)
+# All Spark resources use DynamicRemoteSparkResource which reads
+# the master URL exclusively from the infrastructure config database.
+# Static SparkResource and DynamicSparkResource are intentionally
+# excluded to enforce a single source of truth for cluster connection.
 resources = {
     "dbt": DbtCliResource(
         project_dir=os.environ.get("DBT_PROJECT_DIR", "/app/dbt"),
         profiles_dir=os.environ.get("DBT_PROFILES_DIR", "/app/dbt"),
     ),
-    # Static Spark resource (uses environment config)
-    "spark": SparkResource(
-        master=os.environ.get("SPARK_MASTER_URL", "spark://spark-master:7077"),
-        app_name="NovaSight",
-    ),
-    # Dynamic Spark resource (uses database config)
-    "spark_dynamic": DynamicSparkResource(
-        fallback_master=os.environ.get("SPARK_MASTER_URL", "spark://spark-master:7077"),
-        fallback_app_name="NovaSight",
-    ),
-    # Remote Spark resource (for SSH-based spark-submit on remote servers)
+    # Dynamic Remote Spark resource — single source of truth
+    # Reads master URL from DB infrastructure config at runtime.
+    # Env var is only used as initial fallback until admin configures via UI.
     "spark_remote": DynamicRemoteSparkResource(
         ssh_host=os.environ.get("SPARK_SSH_HOST", ""),
         spark_master=os.environ.get("SPARK_MASTER_URL", "spark://spark-master:7077"),

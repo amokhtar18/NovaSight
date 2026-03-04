@@ -68,7 +68,6 @@ import {
   GitBranch,
   Search,
   RefreshCw,
-  Server,
   ArrowRight,
   Activity,
   Calendar,
@@ -282,12 +281,6 @@ export function SchedulingPage() {
           <Button variant="outline" onClick={handleOpenDagsterUI}>
             <ExternalLink className="mr-2 h-4 w-4" />
             Dagster UI
-          </Button>
-          <Button variant="outline" asChild>
-            <Link to="/app/jobs/spark-config">
-              <Server className="mr-2 h-4 w-4" />
-              Spark Config
-            </Link>
           </Button>
           <Button asChild>
             <Link to="/app/jobs/new">

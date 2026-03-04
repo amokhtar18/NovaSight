@@ -106,6 +106,12 @@ class UnifiedJobService:
         created_by: str = None,
     ) -> Dict[str, Any]:
         """Create a new Dagster job for a PySpark app."""
+        # Validate UUID format
+        try:
+            UUID(str(pyspark_app_id))
+        except (ValueError, AttributeError):
+            raise ValueError(f"Invalid PySpark app ID format: {pyspark_app_id}")
+
         # Validate PySpark app exists
         pyspark_app = PySparkApp.query.filter(
             PySparkApp.id == pyspark_app_id,
@@ -195,6 +201,13 @@ class UnifiedJobService:
         created_by: str = None,
     ) -> Dict[str, Any]:
         """Create a pipeline job that runs multiple PySpark apps."""
+        # Validate UUID formats
+        for app_id in pyspark_app_ids:
+            try:
+                UUID(str(app_id))
+            except (ValueError, AttributeError):
+                raise ValueError(f"Invalid PySpark app ID format: {app_id}")
+
         # Validate all PySpark apps exist
         apps = PySparkApp.query.filter(
             PySparkApp.id.in_(pyspark_app_ids),
@@ -336,7 +349,12 @@ class UnifiedJobService:
         return self._dag_to_job_dict(dag)
     
     def delete_job(self, job_id: str) -> bool:
-        """Delete a job (soft delete by archiving)."""
+        """Delete a job (soft delete by archiving).
+        
+        The dag_id is suffixed with '__archived_<timestamp>' to free up
+        the name for reuse, since the DB enforces a unique constraint
+        on (tenant_id, dag_id).
+        """
         dag = DagConfig.query.filter(
             DagConfig.id == job_id,
             DagConfig.tenant_id == self.tenant_id,
@@ -345,6 +363,11 @@ class UnifiedJobService:
         if not dag:
             return False
         
+        # Suffix the dag_id so the name can be reused for new jobs.
+        # The unique constraint uq_tenant_dag_id prevents two rows
+        # with the same (tenant_id, dag_id) regardless of status.
+        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        dag.dag_id = f"{dag.dag_id}__archived_{timestamp}"
         dag.status = DagStatus.ARCHIVED
         db.session.commit()
         
@@ -737,188 +760,7 @@ class UnifiedJobService:
         
         return False
     
-    # =========================================================================
-    # Spark Configuration
-    # =========================================================================
-    
-    def get_spark_config(self) -> Dict[str, Any]:
-        """Get current Spark cluster configuration."""
-        try:
-            from app.platform.infrastructure import InfrastructureConfigProvider
-            
-            provider = InfrastructureConfigProvider()
-            config = provider.get_spark_config()
-            
-            if config:
-                return {
-                    "spark_master": config.master_url,
-                    "ssh_host": config.ssh_host,
-                    "ssh_user": config.ssh_user,
-                    "webui_port": config.webui_port,
-                    "driver_memory": config.driver_memory,
-                    "executor_memory": config.executor_memory,
-                    "executor_cores": config.executor_cores,
-                    "num_executors": config.num_executors,
-                    "additional_configs": config.additional_configs or {},
-                }
-        except Exception as e:
-            logger.warning(f"Failed to get Spark config: {e}")
-        
-        return {
-            "spark_master": "spark://spark-master:7077",
-            "ssh_host": "",
-            "ssh_user": "spark",
-            "webui_port": 8080,
-            "driver_memory": "2g",
-            "executor_memory": "2g",
-            "executor_cores": 2,
-            "num_executors": 2,
-            "additional_configs": {},
-        }
-    
-    def update_spark_config(self, **kwargs) -> Dict[str, Any]:
-        """Update Spark cluster configuration."""
-        try:
-            from app.domains.tenants.infrastructure.config_service import InfrastructureConfigService
-            import re
-            
-            service = InfrastructureConfigService()
-            
-            # Get existing active spark config (global - tenant_id=None)
-            existing_config = service.get_active_config('spark', None)
-            
-            # Map kwargs to settings format
-            spark_master = kwargs.get('spark_master', 'spark://spark-master:7077')
-            
-            # Extract host and port from spark master URL
-            match = re.search(r'spark://([^:]+):(\d+)', spark_master)
-            if match:
-                host = match.group(1)
-                port = int(match.group(2))
-            else:
-                host = 'spark-master'
-                port = 7077
-            
-            settings = {
-                'master_url': spark_master,
-                'ssh_host': kwargs.get('ssh_host', ''),
-                'ssh_user': kwargs.get('ssh_user', 'spark'),
-                'webui_port': kwargs.get('webui_port', 8080),
-                'driver_memory': kwargs.get('driver_memory', '2g'),
-                'executor_memory': kwargs.get('executor_memory', '2g'),
-                'executor_cores': kwargs.get('executor_cores', 2),
-                'num_executors': kwargs.get('num_executors', 2),
-                'deploy_mode': kwargs.get('deploy_mode', 'client'),
-                'dynamic_allocation': kwargs.get('dynamic_allocation', True),
-                'min_executors': kwargs.get('min_executors', 1),
-                'max_executors': kwargs.get('max_executors', 10),
-                'spark_home': kwargs.get('spark_home', '/opt/spark'),
-                'additional_configs': kwargs.get('additional_configs', {}),
-            }
-            
-            if existing_config and not existing_config.is_system_default:
-                # Update existing config
-                service.update_config(
-                    config_id=str(existing_config.id),
-                    host=host,
-                    port=port,
-                    settings=settings,
-                    updated_by=None,  # System-level update
-                )
-            else:
-                # Create new global spark config
-                service.create_config(
-                    service_type='spark',
-                    name='Spark Cluster',
-                    host=host,
-                    port=port,
-                    settings=settings,
-                    tenant_id=None,  # Global config
-                    description='Global Spark cluster configuration',
-                    is_active=True,
-                    created_by=None,  # System-level creation
-                )
-            
-            return self.get_spark_config()
-        except Exception as e:
-            logger.error(f"Failed to update Spark config: {e}")
-            raise
-    
-    def test_spark_connection(self, custom_config: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Test connection to Spark cluster.
-        
-        Args:
-            custom_config: Optional dict with custom values to test.
-                          If provided, uses these values instead of saved config.
-        """
-        # Use custom config if provided, otherwise get saved config
-        if custom_config:
-            config = {
-                "spark_master": custom_config.get("spark_master", ""),
-                "ssh_host": custom_config.get("ssh_host", ""),
-                "ssh_user": custom_config.get("ssh_user", "spark"),
-                "webui_port": custom_config.get("webui_port", 8080),
-            }
-        else:
-            config = self.get_spark_config()
-        
-        result = {
-            "ssh_connection": False,
-            "spark_master": False,
-            "errors": [],
-        }
-        
-        ssh_host = config.get("ssh_host")
-        
-        if ssh_host:
-            # Test SSH connection
-            import subprocess
-            
-            ssh_cmd = [
-                "ssh",
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "BatchMode=yes",
-                "-o", "ConnectTimeout=10",
-                f"{config.get('ssh_user', 'spark')}@{ssh_host}",
-                "echo connected",
-            ]
-            
-            try:
-                ssh_result = subprocess.run(
-                    ssh_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-                result["ssh_connection"] = ssh_result.returncode == 0
-                if not result["ssh_connection"]:
-                    result["errors"].append(f"SSH: {ssh_result.stderr}")
-            except Exception as e:
-                result["errors"].append(f"SSH: {str(e)}")
-        else:
-            result["ssh_connection"] = None  # Not configured
-        
-        # Test Spark master (via REST API if available)
-        spark_master = config.get("spark_master", "")
-        webui_port = config.get("webui_port", 8080)
-        if "spark://" in spark_master:
-            # Extract host and check REST API port
-            import re
-            match = re.search(r"spark://([^:]+):(\d+)", spark_master)
-            if match:
-                host = match.group(1)
-                try:
-                    response = requests.get(f"http://{host}:{webui_port}/json/", timeout=10)
-                    result["spark_master"] = response.status_code == 200
-                except Exception as e:
-                    result["errors"].append(f"Spark: {str(e)}")
-        
-        result["success"] = (
-            (result["ssh_connection"] or result["ssh_connection"] is None) and
-            result["spark_master"]
-        )
-        
-        return result
+
     
     # =========================================================================
     # Helper Methods

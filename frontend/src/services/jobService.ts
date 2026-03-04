@@ -65,18 +65,6 @@ export interface JobLog {
   step?: string
 }
 
-export interface SparkConfig {
-  spark_master: string
-  ssh_host?: string
-  ssh_user?: string
-  webui_port?: number
-  driver_memory: string
-  executor_memory: string
-  executor_cores: number
-  num_executors: number
-  additional_configs?: Record<string, string>
-}
-
 export interface CreateJobRequest {
   pyspark_app_id: string
   schedule?: string
@@ -235,43 +223,6 @@ class JobService {
 
   async cancelRun(jobId: string, runId: string): Promise<void> {
     await apiClient.post(`${this.baseUrl}/${jobId}/runs/${runId}/cancel`)
-  }
-
-  // ---------------------------------------------------------------------------
-  // Spark Configuration
-  // ---------------------------------------------------------------------------
-
-  async getSparkConfig(): Promise<SparkConfig> {
-    const response = await apiClient.get<{ config: SparkConfig }>(`${this.baseUrl}/spark-config`)
-    return response.data.config
-  }
-
-  async updateSparkConfig(config: Partial<SparkConfig>): Promise<SparkConfig> {
-    const response = await apiClient.put<{ config: SparkConfig }>(
-      `${this.baseUrl}/spark-config`,
-      config
-    )
-    return response.data.config
-  }
-
-  async testSparkConnection(config?: {
-    spark_master?: string
-    ssh_host?: string
-    ssh_user?: string
-    webui_port?: number
-  }): Promise<{
-    success: boolean
-    ssh_connection: boolean | null
-    spark_master: boolean
-    errors: string[]
-  }> {
-    const response = await apiClient.post<{
-      success: boolean
-      ssh_connection: boolean | null
-      spark_master: boolean
-      errors: string[]
-    }>(`${this.baseUrl}/spark-config/test`, config || {})
-    return response.data
   }
 }
 

@@ -119,6 +119,9 @@ def create_job():
         )
     except ValueError as e:
         raise ValidationError(str(e))
+    except Exception as e:
+        logger.error(f"Failed to create job: {e}", exc_info=True)
+        raise
     
     logger.info(f"Created Dagster job for PySpark app {pyspark_app_id}")
     
@@ -126,7 +129,7 @@ def create_job():
         action='job.created',
         resource_type='dagster_job',
         resource_id=str(job_config['id']),
-        resource_name=job_config['name'],
+        resource_name=job_config.get('dag_id', job_config.get('name', '')),
         tenant_id=tenant_id,
         extra_data={'pyspark_app_id': pyspark_app_id},
     )
@@ -172,15 +175,21 @@ def create_pipeline_job():
     from app.domains.orchestration.application.unified_job_service import UnifiedJobService
     
     service = UnifiedJobService(tenant_id)
-    job_config = service.create_pipeline_job(
-        pyspark_app_ids=pyspark_app_ids,
-        name=name,
-        description=data.get("description"),
-        schedule=data.get("schedule"),
-        parallel=data.get("parallel", False),
-        spark_config=data.get("spark_config"),
-        created_by=user_id,
-    )
+    try:
+        job_config = service.create_pipeline_job(
+            pyspark_app_ids=pyspark_app_ids,
+            name=name,
+            description=data.get("description"),
+            schedule=data.get("schedule"),
+            parallel=data.get("parallel", False),
+            spark_config=data.get("spark_config"),
+            created_by=user_id,
+        )
+    except ValueError as e:
+        raise ValidationError(str(e))
+    except Exception as e:
+        logger.error(f"Failed to create pipeline job: {e}", exc_info=True)
+        raise
     
     logger.info(f"Created pipeline job '{name}' with {len(pyspark_app_ids)} apps")
     
@@ -502,97 +511,3 @@ def cancel_job_run(job_id: str, run_id: str):
     
     return jsonify({"message": "Run cancelled", "success": True})
 
-
-# =============================================================================
-# Spark Configuration Endpoints
-# =============================================================================
-
-@api_v1_bp.route("/jobs/spark-config", methods=["GET"])
-@jwt_required()
-@require_tenant_context
-def get_spark_config():
-    """Get current Spark cluster configuration."""
-    identity = get_current_identity()
-    tenant_id = identity.tenant_id
-    
-    from app.domains.orchestration.application.unified_job_service import UnifiedJobService
-    
-    service = UnifiedJobService(tenant_id)
-    config = service.get_spark_config()
-    
-    return jsonify({"config": config})
-
-
-@api_v1_bp.route("/jobs/spark-config", methods=["PUT"])
-@jwt_required()
-@require_tenant_context
-@require_roles(["tenant_admin"])
-def update_spark_config():
-    """
-    Update Spark cluster configuration.
-    
-    Request Body:
-        - spark_master: Spark master URL
-        - ssh_host: SSH host for remote execution
-        - ssh_user: SSH username
-        - ssh_key_path: Path to SSH private key
-        - driver_memory: Driver memory (e.g., "2g")
-        - executor_memory: Executor memory (e.g., "2g")
-        - executor_cores: Executor cores
-        - num_executors: Number of executors
-        - additional_configs: Dict of additional Spark configs
-    """
-    identity = get_current_identity()
-    tenant_id = identity.tenant_id
-    
-    data = request.get_json()
-    if not data:
-        raise ValidationError("Request body required")
-    
-    from app.domains.orchestration.application.unified_job_service import UnifiedJobService
-    
-    service = UnifiedJobService(tenant_id)
-    config = service.update_spark_config(**data)
-    
-    logger.info(f"Updated Spark config for tenant {tenant_id}")
-    
-    AuditService.log(
-        action='spark_config.updated',
-        resource_type='spark_config',
-        tenant_id=tenant_id,
-        changes={'updated_fields': list(data.keys())},
-    )
-    
-    return jsonify({"config": config})
-
-
-@api_v1_bp.route("/jobs/spark-config/test", methods=["POST"])
-@jwt_required()
-@require_tenant_context
-@require_roles(["data_engineer", "tenant_admin"])
-def test_spark_connection():
-    """
-    Test connection to Spark cluster.
-    
-    Validates SSH connectivity and Spark master availability.
-    
-    Request Body (optional):
-        - spark_master: Spark master URL to test
-        - ssh_host: SSH host to test
-        - ssh_user: SSH user
-        - webui_port: Spark master web UI port
-        
-    If no body provided, tests the saved configuration.
-    """
-    identity = get_current_identity()
-    tenant_id = identity.tenant_id
-    
-    # Get optional custom config to test
-    data = request.get_json() or {}
-    
-    from app.domains.orchestration.application.unified_job_service import UnifiedJobService
-    
-    service = UnifiedJobService(tenant_id)
-    result = service.test_spark_connection(custom_config=data if data else None)
-    
-    return jsonify(result)

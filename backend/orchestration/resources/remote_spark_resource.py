@@ -128,25 +128,47 @@ class RemoteSparkResource(ConfigurableResource):
         spark_config: Optional[Dict[str, str]] = None,
         py_files: Optional[List[str]] = None,
         jars: Optional[List[str]] = None,
+        job_resource_config: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
-        """Build the spark-submit command with all options."""
-        dynamic_config = self._get_dynamic_config() or {}
+        """Build the spark-submit command with all options.
         
+        Infrastructure config provides the cluster connection (master URL, deploy mode).
+        Job-level resource config overrides resource allocation (memory, cores, executors).
+        
+        Args:
+            app_path: Path to the Spark application
+            app_args: Arguments to pass to the application
+            spark_config: Additional Spark --conf key=value pairs
+            py_files: Additional Python files to distribute
+            jars: Additional JAR files to include
+            job_resource_config: Per-job resource overrides
+                (driver_memory, executor_memory, executor_cores, num_executors,
+                 additional_configs)
+        """
+        dynamic_config = self._get_dynamic_config() or {}
+        job_rc = job_resource_config or {}
+        
+        # Cluster connection — ONLY from infrastructure config
         master = dynamic_config.get("spark_master", self.spark_master)
-        driver_mem = dynamic_config.get("driver_memory", self.driver_memory)
-        executor_mem = dynamic_config.get("executor_memory", self.executor_memory)
-        executor_cores = dynamic_config.get("executor_cores", self.executor_cores)
         deploy_mode = dynamic_config.get("deploy_mode", self.deploy_mode)
-        additional_configs = dynamic_config.get("additional_configs", {})
+        
+        # Resource allocation — job-level overrides > infra defaults > class defaults
+        driver_mem = job_rc.get("driver_memory") or dynamic_config.get("driver_memory", self.driver_memory)
+        executor_mem = job_rc.get("executor_memory") or dynamic_config.get("executor_memory", self.executor_memory)
+        executor_cores = job_rc.get("executor_cores") or dynamic_config.get("executor_cores", self.executor_cores)
+        num_executors = job_rc.get("num_executors") or dynamic_config.get("num_executors", self.num_executors)
+        
+        # Additional configs — merge infra defaults with job-level overrides
+        additional_configs = {**dynamic_config.get("additional_configs", {}), **job_rc.get("additional_configs", {})}
         
         cmd = [
             f"{self.spark_home}/bin/spark-submit",
             "--master", master,
             "--deploy-mode", deploy_mode,
-            "--driver-memory", driver_mem,
-            "--executor-memory", executor_mem,
+            "--driver-memory", str(driver_mem),
+            "--executor-memory", str(executor_mem),
             "--executor-cores", str(executor_cores),
-            "--num-executors", str(self.num_executors),
+            "--num-executors", str(num_executors),
         ]
         
         # Add additional stored configs
@@ -388,13 +410,13 @@ class RemoteSparkResource(ConfigurableResource):
         spark_config: Optional[Dict[str, str]] = None,
         py_files: Optional[List[str]] = None,
         timeout: int = 3600,
+        job_resource_config: Optional[Dict[str, Any]] = None,
     ) -> SparkJobResult:
         """
         Submit a Spark application via the Spark REST Submission API.
         
-        This is the recommended mode for Docker-based development environments
-        using Spark Standalone. No Docker CLI or SSH required — communicates
-        directly with the Spark Master REST endpoint (port 6066).
+        Cluster connection comes from infrastructure config.
+        Resource allocation can be overridden per-job via job_resource_config.
         
         Requires:
         - Spark Standalone cluster with REST submission enabled (default)
@@ -412,16 +434,34 @@ class RemoteSparkResource(ConfigurableResource):
         start_time = time.time()
         
         dynamic_config = self._get_dynamic_config() or {}
+        job_rc = job_resource_config or {}
+        
+        # Cluster connection — ONLY from infrastructure config
         rest_url = dynamic_config.get("spark_rest_url", self.spark_rest_url).rstrip("/")
         master = dynamic_config.get("spark_master", self.spark_master)
-        driver_mem = dynamic_config.get("driver_memory", self.driver_memory)
-        executor_mem = dynamic_config.get("executor_memory", self.executor_memory)
-        executor_cores = dynamic_config.get("executor_cores", self.executor_cores)
-        num_executors = dynamic_config.get("num_executors", self.num_executors)
-        additional_configs = dynamic_config.get("additional_configs", {})
+        
+        # Resource allocation — job-level overrides > infra defaults > class defaults
+        driver_mem = job_rc.get("driver_memory") or dynamic_config.get("driver_memory", self.driver_memory)
+        executor_mem = job_rc.get("executor_memory") or dynamic_config.get("executor_memory", self.executor_memory)
+        executor_cores = job_rc.get("executor_cores") or dynamic_config.get("executor_cores", self.executor_cores)
+        num_executors = job_rc.get("num_executors") or dynamic_config.get("num_executors", self.num_executors)
+        
+        # Additional configs — merge infra defaults with job-level overrides
+        additional_configs = {**dynamic_config.get("additional_configs", {}), **job_rc.get("additional_configs", {})}
         
         # Build Spark properties
         # spark.app.name and spark.jars are required by the REST protocol validation
+        # Default JDBC drivers for database connectivity
+        # Use extraClassPath so the driver and executors load JARs from local paths
+        # (each node must have these JARs available via shared volume mount)
+        jdbc_jars_glob = "/opt/spark/jars/custom/*"
+        default_jdbc_jars = ",".join([
+            "/opt/spark/jars/custom/postgresql-42.7.4.jar",
+            "/opt/spark/jars/custom/mysql-connector-j-8.2.0.jar",
+            "/opt/spark/jars/custom/clickhouse-jdbc-0.6.3.jar",
+            "/opt/spark/jars/custom/mssql-jdbc-12.4.2.jre11.jar",
+            "/opt/spark/jars/custom/ojdbc8.jar",
+        ])
         spark_properties = {
             "spark.app.name": f"NovaSight_{Path(app_path).stem}",
             "spark.master": master,
@@ -431,6 +471,8 @@ class RemoteSparkResource(ConfigurableResource):
             "spark.executor.cores": str(executor_cores),
             "spark.cores.max": str(executor_cores * num_executors),
             "spark.jars": "",
+            "spark.driver.extraClassPath": jdbc_jars_glob,
+            "spark.executor.extraClassPath": jdbc_jars_glob,
             "spark.submit.pyFiles": ",".join(py_files) if py_files else "",
         }
         
@@ -661,18 +703,25 @@ class RemoteSparkResource(ConfigurableResource):
         jars: Optional[List[str]] = None,
         timeout: int = 3600,
         copy_to_remote: bool = True,
+        job_resource_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Submit a Spark application to the remote cluster.
         
+        Cluster connection (master URL, SSH) comes from infrastructure config.
+        Resource allocation can be overridden per-job via job_resource_config.
+        
         Args:
             app_path: Path to the Spark application (Python file)
             app_args: Arguments to pass to the application
-            spark_config: Additional Spark configuration
+            spark_config: Additional Spark --conf key=value pairs
             py_files: Additional Python files to distribute
             jars: Additional JAR files to include
             timeout: Job timeout in seconds
             copy_to_remote: Whether to copy the job file to remote before execution
+            job_resource_config: Per-job resource overrides
+                (driver_memory, executor_memory, executor_cores, num_executors,
+                 additional_configs)
         
         Returns:
             Dict with success, stdout, stderr, application_id, etc.
@@ -704,6 +753,7 @@ class RemoteSparkResource(ConfigurableResource):
             spark_config=spark_config,
             py_files=py_files,
             jars=jars,
+            job_resource_config=job_resource_config,
         )
         
         # Execute based on mode
@@ -718,6 +768,7 @@ class RemoteSparkResource(ConfigurableResource):
                 spark_config=spark_config,
                 py_files=py_files,
                 timeout=timeout,
+                job_resource_config=job_resource_config,
             )
         elif ssh_host and execution_mode == "ssh":
             result = self._execute_via_ssh(command, timeout)
@@ -812,13 +863,17 @@ class RemoteSparkResource(ConfigurableResource):
         ssh_user = dynamic_config.get("ssh_user", self.ssh_user)
         ssh_key = dynamic_config.get("ssh_key_path", self.ssh_key_path)
         
+        # Use dynamic master URL (from DB) with fallback to static default
+        master = dynamic_config.get("spark_master", self.spark_master)
+        spark_home = dynamic_config.get("spark_home", self.spark_home)
+        
         if not ssh_host:
             # Local mode - use spark-class to kill
             cmd = [
-                f"{self.spark_home}/bin/spark-class",
+                f"{spark_home}/bin/spark-class",
                 "org.apache.spark.deploy.Client",
                 "kill",
-                self.spark_master,
+                master,
                 application_id,
             ]
         else:
@@ -829,7 +884,7 @@ class RemoteSparkResource(ConfigurableResource):
             ssh_cmd.extend(["-p", str(self.ssh_port)])
             ssh_cmd.append(f"{ssh_user}@{ssh_host}")
             
-            kill_cmd = f"{self.spark_home}/bin/spark-class org.apache.spark.deploy.Client kill {self.spark_master} {application_id}"
+            kill_cmd = f"{spark_home}/bin/spark-class org.apache.spark.deploy.Client kill {master} {application_id}"
             ssh_cmd.append(kill_cmd)
             cmd = ssh_cmd
         

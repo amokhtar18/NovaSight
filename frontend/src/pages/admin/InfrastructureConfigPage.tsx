@@ -329,10 +329,21 @@ const ConfigDialog: React.FC<ConfigDialogProps> = ({
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: type === 'number' ? parseInt(value, 10) || 0 : value,
-    }));
+    setFormData(prev => {
+      const updated = {
+        ...prev,
+        [name]: type === 'number' ? parseInt(value, 10) || 0 : value,
+      };
+      // Auto-fill Spark master_url when host or port changes
+      if (serviceType === 'spark' && (name === 'host' || name === 'port')) {
+        const host = name === 'host' ? value : prev.host;
+        const port = name === 'port' ? (parseInt(value, 10) || 0) : prev.port;
+        if (host && port) {
+          updated.settings = { ...updated.settings, master_url: `spark://${host}:${port}` };
+        }
+      }
+      return updated;
+    });
   };
 
   const updateSetting = (key: string, value: unknown) => {
@@ -439,15 +450,21 @@ const ConfigDialog: React.FC<ConfigDialogProps> = ({
       case 'spark':
         return (
           <div className="space-y-4">
-            {field('Master URL', 'master_url', { placeholder: 'spark://spark-master:7077' })}
-            <div className="grid grid-cols-2 gap-4">
-              {field('Driver Memory', 'driver_memory', { placeholder: '2g' })}
-              {field('Executor Memory', 'executor_memory', { placeholder: '2g' })}
+            <div className="space-y-1.5">
+              <Label htmlFor="s-master_url">Master URL</Label>
+              <Input
+                id="s-master_url"
+                value={formData.settings.master_url as string ?? ''}
+                placeholder="spark://spark-master:7077"
+                readOnly
+                className="bg-muted/50 cursor-not-allowed"
+              />
+              <p className="text-[11px] text-muted-foreground">Auto-generated from Host and Port above</p>
             </div>
-            <div className="grid grid-cols-3 gap-4">
-              {field('Executor Cores', 'executor_cores', { type: 'number', min: 1 })}
-              {field('Min Executors', 'min_executors', { type: 'number', min: 0 })}
-              {field('Max Executors', 'max_executors', { type: 'number', min: 1 })}
+            {field('SSH Host', 'ssh_host', { placeholder: 'spark-server', hint: 'Hostname for SSH-based remote execution (optional)' })}
+            <div className="grid grid-cols-2 gap-4">
+              {field('SSH User', 'ssh_user', { placeholder: 'spark' })}
+              {field('Web UI Port', 'webui_port', { type: 'number', min: 1, hint: 'Spark Master Web UI port for testing connectivity' })}
             </div>
           </div>
         );

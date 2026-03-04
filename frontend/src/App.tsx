@@ -26,7 +26,6 @@ import { DagsterDashboardPage } from '@/pages/orchestration/DagsterDashboardPage
 import { SchedulingPage } from '@/pages/orchestration/SchedulingPage'
 import { JobBuilderPage } from '@/pages/orchestration/JobBuilderPage'
 import { JobDetailPage } from '@/pages/orchestration/JobDetailPage'
-import { SparkConfigPage } from '@/pages/orchestration/SparkConfigPage'
 import { DataSourcesPage, DataSourceDetailPage } from '@/features/datasources'
 import { 
   PySparkAppsListPage, 
@@ -118,7 +117,6 @@ function App() {
             <Route path="jobs/:jobId" element={<JobDetailPage />} />
             <Route path="jobs/:jobId/edit" element={<JobBuilderPage />} />
             <Route path="jobs/:jobId/runs" element={<JobDetailPage />} />
-            <Route path="jobs/spark-config" element={<SparkConfigPage />} />
             
             {/* PySpark Apps */}
             <Route path="pyspark" element={<PySparkAppsListPage />} />

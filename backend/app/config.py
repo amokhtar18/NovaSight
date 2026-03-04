@@ -47,9 +47,9 @@ class BaseConfig:
     CLICKHOUSE_DATABASE = os.getenv("CLICKHOUSE_DATABASE", "novasight")
     
     # Spark Configuration
-    SPARK_MASTER_HOST = os.getenv("SPARK_MASTER_HOST", "localhost")
+    SPARK_MASTER_HOST = os.getenv("SPARK_MASTER_HOST", "spark-master")
     SPARK_MASTER_PORT = int(os.getenv("SPARK_MASTER_PORT", "7077"))
-    SPARK_MASTER_URL = os.getenv("SPARK_MASTER_URL", "spark://localhost:7077")
+    SPARK_MASTER_URL = os.getenv("SPARK_MASTER_URL", "spark://spark-master:7077")
     SPARK_DRIVER_MEMORY = os.getenv("SPARK_DRIVER_MEMORY", "2g")
     SPARK_EXECUTOR_MEMORY = os.getenv("SPARK_EXECUTOR_MEMORY", "2g")
     SPARK_EXECUTOR_CORES = int(os.getenv("SPARK_EXECUTOR_CORES", "2"))

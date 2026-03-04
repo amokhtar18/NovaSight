@@ -774,9 +774,9 @@ class InfrastructureConfigService:
             }
         if service_type == InfrastructureType.SPARK.value:
             return {
-                "host": "localhost",
+                "host": "spark-master",
                 "port": 7077,
-                "master_url": "spark://localhost:7077",
+                "master_url": "spark://spark-master:7077",
                 "deploy_mode": "client",
                 "driver_memory": "2g",
                 "executor_memory": "2g",
