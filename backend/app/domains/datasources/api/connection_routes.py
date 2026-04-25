@@ -16,6 +16,11 @@ from flask import request, jsonify
 from app.api.v1 import api_v1_bp
 from app.extensions import db
 from app.domains.datasources.application.connection_service import ConnectionService
+from app.domains.datasources.application.connection_validators import (
+    validate_connection_data,
+    get_supported_types,
+    is_file_based,
+)
 from app.platform.auth.identity import get_current_identity
 from app.platform.auth.decorators import authenticated, require_roles, tenant_required
 from app.errors import ValidationError, NotFoundError
@@ -23,6 +28,31 @@ from app.platform.audit.service import AuditService
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+@api_v1_bp.route("/connections/types", methods=["GET"])
+@authenticated
+@tenant_required
+def list_connection_types():
+    """List available connection types with metadata."""
+    from app.domains.datasources.infrastructure.connectors import ConnectorRegistry
+
+    types_info = []
+    for db_type in get_supported_types():
+        entry = {
+            "type": db_type,
+            "category": "file" if is_file_based(db_type) else "database",
+            "requires_upload": is_file_based(db_type),
+        }
+        try:
+            info = ConnectorRegistry.get_connector_info(db_type)
+            entry.update(info)
+        except ValueError:
+            entry["default_port"] = 0
+            entry["supports_ssl"] = False
+        types_info.append(entry)
+
+    return jsonify({"types": types_info})
 
 
 @api_v1_bp.route("/connections", methods=["GET"])
@@ -60,18 +90,18 @@ def create_connection():
     if not data:
         raise ValidationError("Request body required")
 
-    required_fields = [
-        "name", "db_type", "host", "port", "database", "username", "password",
-    ]
-    for field in required_fields:
-        if not data.get(field):
-            raise ValidationError(f"Field '{field}' is required")
+    # Name is always required
+    if not data.get("name"):
+        raise ValidationError("Field 'name' is required")
+    if not data.get("db_type"):
+        raise ValidationError("Field 'db_type' is required")
 
-    valid_db_types = ["postgresql", "oracle", "sqlserver", "mysql", "clickhouse"]
-    if data["db_type"] not in valid_db_types:
-        raise ValidationError(
-            f"Invalid db_type. Must be one of: {', '.join(valid_db_types)}"
-        )
+    db_type = data["db_type"]
+
+    # Validate db_type and per-type required fields via registry
+    valid, error_msg = validate_connection_data(db_type, data)
+    if not valid:
+        raise ValidationError(error_msg)
 
     connection_service = ConnectionService(tenant_id)
 
@@ -83,15 +113,16 @@ def create_connection():
         connection = connection_service.create_connection(
             name=data["name"],
             db_type=data["db_type"],
-            host=data["host"],
-            port=data["port"],
-            database=data["database"],
-            username=data["username"],
-            password=data["password"],
+            host=data.get("host"),
+            port=data.get("port"),
+            database=data.get("database"),
+            username=data.get("username"),
+            password=data.get("password"),
             ssl_mode=ssl_mode,
             schema_name=data.get("schema_name"),
             extra_params=data.get("extra_params", {}),
             created_by=user_id,
+            upload_token=data.get("upload_token"),
         )
     except ValueError as e:
         raise ValidationError(str(e))
@@ -238,6 +269,18 @@ def test_new_connection():
 
     if not data:
         raise ValidationError("Request body required")
+
+    if not data.get("db_type"):
+        raise ValidationError("Field 'db_type' is required")
+
+    db_type = data["db_type"]
+
+    # File-based sources cannot be "test connected" in the traditional sense
+    if is_file_based(db_type):
+        return jsonify({
+            "success": True,
+            "message": "File-based sources do not require connection testing",
+        })
 
     required_fields = ["db_type", "host", "port", "database", "username", "password"]
     for field in required_fields:
@@ -554,6 +597,157 @@ def execute_clickhouse_query():
     except Exception as e:
         logger.error(f"ClickHouse query failed: {e}")
         raise ValidationError(f"Query execution failed: {str(e)}")
+
+
+# ─── File Upload Endpoints ────────────────────────────────────────────────────
+
+
+@api_v1_bp.route("/connections/uploads", methods=["POST"])
+@authenticated
+@tenant_required
+@require_roles(["data_engineer", "tenant_admin"])
+def upload_datasource_file():
+    """
+    Upload a file for use as a file-based data source.
+
+    Expects multipart/form-data with:
+        file: the file to upload
+        db_type: 'flatfile' | 'excel' | 'sqlite'
+
+    Returns:
+        upload_token: HMAC-signed single-use token
+        metadata: file metadata and introspection results
+    """
+    import hashlib
+    import hmac
+    import time
+
+    from app.domains.datasources.application.file_validation_service import (
+        FileValidationService,
+        FileValidationError,
+    )
+    from app.domains.datasources.application.file_introspection_service import (
+        FileIntrospectionService,
+    )
+    from app.platform.infrastructure.file_storage import FileStorageService
+
+    identity = get_current_identity()
+    tenant_id = identity.tenant_id
+
+    if "file" not in request.files:
+        raise ValidationError("No file part in request")
+
+    uploaded_file = request.files["file"]
+    if not uploaded_file.filename:
+        raise ValidationError("No file selected")
+
+    db_type = request.form.get("db_type")
+    if not db_type or not is_file_based(db_type):
+        raise ValidationError("db_type must be one of: flatfile, excel, sqlite")
+
+    original_filename = uploaded_file.filename
+    file_bytes = uploaded_file.read()
+
+    # 1. Validate (extension, size, format detection, VBA check, ClamAV, content parse)
+    validator = FileValidationService()
+    try:
+        validation_meta = validator.validate(file_bytes, original_filename, db_type)
+    except FileValidationError as e:
+        raise ValidationError(str(e))
+
+    detected_format = validation_meta["detected_format"]
+
+    # 2. Store file securely (UUID-named, tenant-scoped)
+    storage = FileStorageService(tenant_id)
+    store_result = storage.store_file(file_bytes, original_filename)
+
+    # 3. Introspect to give frontend column/preview info
+    introspector = FileIntrospectionService()
+    introspection = introspector.introspect(
+        file_bytes, detected_format, validation_meta["extension"]
+    )
+
+    # 4. Generate HMAC-signed upload token (payload|sig)
+    secret_key = current_app.config.get("SECRET_KEY", "")
+    expires_at = int(time.time()) + current_app.config.get(
+        "FILE_UPLOAD_TOKEN_TTL_SECONDS", 3600
+    )
+    token_payload = f"{tenant_id}|{store_result['file_ref']}|{db_type}|{expires_at}"
+    token_sig = hmac.new(
+        secret_key.encode(),
+        token_payload.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    upload_token = f"{token_payload}|{token_sig}"
+
+    AuditService.log(
+        action="connection.file_uploaded",
+        resource_type="file_upload",
+        resource_id=store_result["file_id"],
+        tenant_id=tenant_id,
+        extra_data={
+            "original_filename": original_filename,
+            "db_type": db_type,
+            "size_bytes": store_result["file_size"],
+            "format": detected_format,
+        },
+    )
+
+    logger.info(
+        f"File uploaded for tenant {tenant_id}: {original_filename} "
+        f"({store_result['file_size']} bytes, format={detected_format})"
+    )
+
+    return jsonify({
+        "upload_token": upload_token,
+        "file_id": store_result["file_id"],
+        "metadata": {
+            "original_filename": original_filename,
+            "size_bytes": store_result["file_size"],
+            "file_hash": store_result["file_hash"],
+            "format": detected_format,
+            "db_type": db_type,
+            "expires_at": expires_at,
+            **introspection.get("metadata", {}),
+        },
+        "columns": introspection.get("columns", []),
+        "preview_rows": introspection.get("preview_rows", []),
+        "sheets": introspection.get("sheets"),     # Excel only
+        "tables": introspection.get("tables"),     # SQLite only
+    }), 201
+
+
+@api_v1_bp.route("/connections/<connection_id>/preview", methods=["POST"])
+@authenticated
+@tenant_required
+@require_roles(["data_engineer", "tenant_admin", "analyst"])
+def preview_connection_data(connection_id: str):
+    """Preview sample data from an existing connection."""
+    identity = get_current_identity()
+    tenant_id = identity.tenant_id
+
+    connection_service = ConnectionService(tenant_id)
+    connection = connection_service.get_connection(connection_id)
+    if not connection:
+        raise NotFoundError("Connection not found")
+
+    data = request.get_json() or {}
+    limit = min(int(data.get("limit", 100)), 500)
+
+    try:
+        preview = connection_service.preview_data(
+            connection_id=connection_id,
+            table=data.get("table"),
+            schema=data.get("schema"),
+            limit=limit,
+        )
+    except ValueError as e:
+        raise ValidationError(str(e))
+
+    return jsonify({
+        "rows": preview.get("rows", []),
+        "columns": preview.get("columns", []),
+    })
 
 
 # â”€â”€â”€ Saved Queries Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

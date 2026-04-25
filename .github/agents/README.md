@@ -23,10 +23,11 @@ Each agent file follows the `.agent.md` naming convention and includes the requi
 | [Infrastructure](#infrastructure) | DevOps & deployment | Docker, databases, networking |
 | [Backend](#backend) | Flask API development | REST APIs, services, models |
 | [Frontend](#frontend) | React UI development | Components, pages, state |
-| [Template Engine](#template-engine) | Code generation | PySpark, DAGs, dbt models |
+| [Template Engine](#template-engine) | Code generation | dlt pipelines, Dagster ops, dbt models |
 | [Orchestration](#orchestration) | Dagster jobs | Pipeline scheduling, monitoring |
 | [AI](#ai) | LLM integration | NL to SQL, query assistance |
 | [Data Sources](#data-sources) | Database connections | Connection CRUD, introspection |
+| [Ingestion](#ingestion) | dlt + Iceberg lake | Per-tenant pipelines, S3 isolation |
 | [dbt](#dbt) | Semantic layer | Model builder, lineage |
 | [Dashboard](#dashboard) | Analytics & visualization | Charts, dashboards, SQL editor |
 | [Admin](#admin) | Tenant management | Users, roles, quotas |
@@ -119,13 +120,13 @@ Manages secure code generation from templates.
 **Key Responsibilities:**
 - Jinja2 template management
 - Pydantic validation schemas
-- Artifact generation (PySpark, jobs, dbt)
+- Artifact generation (dlt pipelines, Dagster ops, dbt)
 - Security validation
 
 ⚠️ **CRITICAL:** Enforces Template Engine Rule - no arbitrary code generation.
 
 **When to Use:**
-- Generating PySpark jobs
+- Generating dlt ingestion pipelines
 - Creating Dagster jobs
 - Building dbt models
 
@@ -182,6 +183,27 @@ Manages database connections and schema introspection.
 - Adding data source support
 - Schema browsing features
 - Connection management
+
+---
+
+### Ingestion
+**File:** `ingestion-agent.agent.md`
+
+Owns dlt-based ingestion writing into per-tenant Apache Iceberg tables on S3.
+
+**Key Responsibilities:**
+- dlt pipeline domain (CRUD, generation, run)
+- Iceberg SQL catalog (Postgres-backed) helpers
+- Per-tenant S3 bucket isolation
+- Mapping plain-language freshness choices → `extract` / `merge` / `scd2` strategies
+- Dagster `DltAssetBuilder` integration
+
+⚠️ **CRITICAL:** Replaces the deprecated PySpark compute path. See [.github/instructions/MIGRATION_SPARK_TO_DLT.md](../instructions/MIGRATION_SPARK_TO_DLT.md).
+
+**When to Use:**
+- Building or modifying ingestion pipelines
+- Provisioning per-tenant lake storage
+- Wiring dlt assets into Dagster
 
 ---
 

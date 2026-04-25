@@ -99,6 +99,23 @@ class BaseConfig:
     DEFAULT_PAGE_SIZE = 20
     MAX_PAGE_SIZE = 100
 
+    # File-Based Data Sources
+    FILE_UPLOAD_MAX_SIZE_MB = int(os.getenv("FILE_UPLOAD_MAX_SIZE_MB", "200"))
+    FILE_UPLOAD_MAX_SIZE_BYTES = FILE_UPLOAD_MAX_SIZE_MB * 1024 * 1024
+    FILE_STORAGE_ROOT = os.getenv(
+        "FILE_STORAGE_ROOT",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "file_storage"),
+    )
+    FILE_UPLOAD_ALLOWED_EXTENSIONS = {
+        ".csv", ".tsv", ".txt", ".json", ".parquet",
+        ".xlsx", ".xls",
+        ".sqlite", ".db", ".sqlite3",
+    }
+    FILE_UPLOAD_TOKEN_TTL_SECONDS = int(os.getenv("FILE_UPLOAD_TOKEN_TTL_SECONDS", "3600"))
+    CLAMAV_ENABLED = os.getenv("CLAMAV_ENABLED", "true").lower() in ("true", "1", "yes")
+    CLAMAV_HOST = os.getenv("CLAMAV_HOST", "localhost")
+    CLAMAV_PORT = int(os.getenv("CLAMAV_PORT", "3310"))
+
 
 class DevelopmentConfig(BaseConfig):
     """Development environment configuration."""

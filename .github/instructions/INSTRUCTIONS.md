@@ -138,7 +138,7 @@ Follow the implementation plan phases:
 **Purpose:** Generates code artifacts from validated templates.
 
 **When to use:**
-- Creating PySpark job templates
+- Creating dlt pipeline templates
 - Generating Dagster pipeline code
 - Building dbt model files
 - Any code generation task
@@ -147,7 +147,7 @@ Follow the implementation plan phases:
 
 **Example:**
 ```
-@template-engine Generate a PySpark full-load job for the orders table.
+@template-engine Generate a dlt extract pipeline (replace mode) for the orders table.
 ```
 
 ### AI Agent

@@ -37,19 +37,32 @@ class ConnectionTestException(ConnectorException):
 # ─── Connection Config ────────────────────────────────────────────
 
 class ConnectionConfig(BaseModel):
-    """Base configuration for database connections."""
-    host: str = Field(..., min_length=1, max_length=255)
-    port: int = Field(..., ge=1, le=65535)
-    database: str = Field(..., min_length=1, max_length=128)
-    username: str = Field(..., min_length=1, max_length=128)
-    password: str = Field(..., min_length=1)
+    """Base configuration for database connections.
+    
+    For database connectors: host, port, database, username, password are required.
+    For file-based connectors: file_ref is required; host/port/etc. are optional.
+    """
+    host: Optional[str] = Field(None, max_length=255)
+    port: Optional[int] = Field(None, ge=1, le=65535)
+    database: Optional[str] = Field(None, max_length=128)
+    username: Optional[str] = Field(None, max_length=128)
+    password: Optional[str] = Field(None)
     ssl: bool = True
     ssl_mode: Optional[str] = None
     schema_name: Optional[str] = Field(default=None, alias="schema")
     extra_params: Dict[str, Any] = Field(default_factory=dict)
 
+    # File-based source fields
+    file_ref: Optional[str] = Field(None, max_length=1024, description="Object storage key for file-based sources")
+    file_format: Optional[str] = Field(None, max_length=20, description="File format: csv, tsv, json, parquet, xlsx, sqlite")
+
     # NovaSight-specific extra_params keys that should NOT be passed to database drivers
-    _novasight_extra_keys = frozenset(["allowed_schemas", "thick_mode", "service_name"])
+    _novasight_extra_keys = frozenset([
+        "allowed_schemas", "thick_mode", "service_name",
+        "file_ref", "file_name", "file_size", "file_hash", "mime_type",
+        "file_format", "delimiter", "encoding", "has_header", "header_row",
+        "sheet_names",
+    ])
 
     @property
     def driver_extra_params(self) -> Dict[str, Any]:

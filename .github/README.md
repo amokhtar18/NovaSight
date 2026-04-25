@@ -16,6 +16,7 @@ This directory contains the multi-agent framework for implementing NovaSight, a 
 │   ├── orchestration-agent.agent.md
 │   ├── ai-agent.agent.md
 │   ├── data-sources-agent.agent.md
+│   ├── ingestion-agent.agent.md       # dlt + Iceberg-on-S3 (replaces PySpark)
 │   ├── dbt-agent.agent.md
 │   ├── testing-agent.agent.md
 │   ├── security-agent.agent.md
@@ -27,6 +28,7 @@ This directory contains the multi-agent framework for implementing NovaSight, a 
 │   ├── flask-api/SKILL.md
 │   ├── react-components/SKILL.md
 │   ├── template-engine/SKILL.md
+│   ├── dlt-iceberg/SKILL.md            # tenant-isolated dlt + Iceberg
 │   ├── multi-tenant-db/SKILL.md
 │   └── airflow-dags/SKILL.md
 │
@@ -34,7 +36,8 @@ This directory contains the multi-agent framework for implementing NovaSight, a 
 │   └── PROMPTS.md             # Implementation prompt templates
 │
 ├── instructions/
-│   └── INSTRUCTIONS.md        # Framework usage instructions
+│   ├── INSTRUCTIONS.md        # Framework usage instructions
+│   └── MIGRATION_SPARK_TO_DLT.md  # Active: replace Spark with dlt + Iceberg + dbt
 │
 └── README.md                  # This file
 ```
@@ -68,7 +71,7 @@ Use the orchestrator agent to begin implementation:
 ## ⚠️ Critical Rules
 
 ### Template Engine Rule (ADR-002)
-**NO ARBITRARY CODE GENERATION.** All executable artifacts (DAGs, PySpark jobs, dbt models) must be generated from pre-approved, security-audited Jinja2 templates.
+**NO ARBITRARY CODE GENERATION.** All executable artifacts (dlt pipelines, Dagster ops, dbt models) must be generated from pre-approved, security-audited Jinja2 templates.
 
 ### Multi-Tenancy
 - PostgreSQL: Schema-per-tenant
@@ -87,7 +90,7 @@ Use the orchestrator agent to begin implementation:
 |-------|------------|
 | Frontend | React, TypeScript, Vite, Shadcn/UI, TanStack Query |
 | Backend | Flask, SQLAlchemy, Pydantic |
-| Compute | PySpark |
+| Ingestion | dlt + Apache Iceberg (per-tenant S3) |
 | Orchestration | Apache Airflow |
 | Data Warehouse | ClickHouse |
 | Transformations | dbt |

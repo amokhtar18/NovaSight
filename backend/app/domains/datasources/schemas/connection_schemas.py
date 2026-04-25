@@ -13,6 +13,12 @@ from datetime import datetime
 from enum import Enum
 
 
+class SourceCategoryEnum(str, Enum):
+    """Source category."""
+    DATABASE = "database"
+    FILE = "file"
+
+
 class DatabaseTypeEnum(str, Enum):
     """Supported database types."""
     POSTGRESQL = "postgresql"
@@ -20,6 +26,26 @@ class DatabaseTypeEnum(str, Enum):
     ORACLE = "oracle"
     SQLSERVER = "sqlserver"
     CLICKHOUSE = "clickhouse"
+    FLATFILE = "flatfile"
+    EXCEL = "excel"
+    SQLITE = "sqlite"
+
+    @property
+    def category(self) -> SourceCategoryEnum:
+        if self in _FILE_TYPE_ENUMS:
+            return SourceCategoryEnum.FILE
+        return SourceCategoryEnum.DATABASE
+
+    @property
+    def is_file_based(self) -> bool:
+        return self.category == SourceCategoryEnum.FILE
+
+
+_FILE_TYPE_ENUMS = frozenset({
+    DatabaseTypeEnum.FLATFILE,
+    DatabaseTypeEnum.EXCEL,
+    DatabaseTypeEnum.SQLITE,
+})
 
 
 class ConnectionStatusEnum(str, Enum):
@@ -76,14 +102,19 @@ class ConnectionCreateSchema(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
     db_type: DatabaseTypeEnum
-    host: str = Field(..., min_length=1, max_length=255)
-    port: int = Field(..., ge=1, le=65535)
-    database: str = Field(..., min_length=1, max_length=255)
-    username: str = Field(..., min_length=1, max_length=255)
-    password: str = Field(..., min_length=1)
+
+    # Database connection fields (required for database types, optional for file types)
+    host: Optional[str] = Field(None, min_length=1, max_length=255)
+    port: Optional[int] = Field(None, ge=1, le=65535)
+    database: Optional[str] = Field(None, min_length=1, max_length=255)
+    username: Optional[str] = Field(None, min_length=1, max_length=255)
+    password: Optional[str] = None
     ssl_mode: Optional[str] = Field(None, max_length=50)
     schema_name: Optional[str] = Field(None, max_length=255)
     extra_params: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+    # File-based source fields
+    upload_token: Optional[str] = Field(None, max_length=512, description="Token from file upload step")
 
     @validator('name')
     def validate_name(cls, v):
@@ -136,17 +167,19 @@ class ConnectionResponseSchema(BaseModel):
     name: str
     description: Optional[str]
     db_type: str
-    host: str
-    port: int
-    database: str
+    source_category: Optional[str] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    database: Optional[str] = None
     schema_name: Optional[str]
-    username: str
+    username: Optional[str] = None
     ssl_mode: Optional[str]
     status: str
     last_tested_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
     created_by: str
+    file_info: Optional[Dict[str, Any]] = None
 
     model_config = {
         "from_attributes": True,

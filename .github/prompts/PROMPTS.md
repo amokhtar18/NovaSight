@@ -129,11 +129,11 @@ Follow the page patterns from frontend-agent.
 ### Prompt: Create Ingestion Pipeline Configuration
 ```
 Create an ingestion pipeline for [SOURCE_TABLE] to [TARGET_TABLE]:
-1. Define PySparkJobConfig with validated schema
+1. Define DltExtractDefinition / DltMergeDefinition / DltSCD2Definition with validated schema
 2. Map source columns to target columns with types
 3. Configure load type (full/incremental)
 4. Set partition strategy if needed
-5. Generate PySpark job using template engine
+5. Generate dlt pipeline using template engine
 6. Create Airflow DAG for scheduling
 
 Follow the template-engine skill and Template Engine Rule strictly.

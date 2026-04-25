@@ -11,6 +11,7 @@ This document provides an index of all reusable skills in the NovaSight multi-ag
 | [Flask API](#flask-api) | REST API development | Blueprints, endpoints, validation |
 | [React Components](#react-components) | UI development | Components, forms, tables |
 | [Template Engine](#template-engine) | Code generation | Templates, schemas, sandboxing |
+| [dlt + Iceberg](#dlt--iceberg) | Tenant-isolated ingestion | dlt pipelines, Iceberg-on-S3, per-tenant lake |
 | [Multi-Tenant DB](#multi-tenant-db) | Database isolation | Schema isolation, RLS |
 | [Airflow DAGs](#airflow-dags) | Pipeline orchestration | DAG creation, scheduling |
 
@@ -81,14 +82,34 @@ Patterns for secure code generation using Jinja2 templates.
 
 **Usage:**
 ```python
-config = PySparkJobConfig(
-    job_name="orders_load",
+config = DltExtractDefinition(
+    pipeline_name="orders_load",
+    tenant_slug="acme",
     source_table="public.orders",
-    target_table="orders",
-    columns=[...]
+    iceberg_namespace="tenant_acme.raw",
+    iceberg_table_name="orders",
+    write_disposition="replace",
+    columns=[...],
 )
-artifact_service.generate_pyspark_job(config, credentials, tenant_id)
+artifact_service.generate_dlt_pipeline(config, credentials, tenant_id)
 ```
+
+---
+
+### dlt + Iceberg
+**File:** `dlt-iceberg/SKILL.md`
+
+Patterns for tenant-isolated ingestion using **dlt** writing into **Apache Iceberg** tables on **per-tenant S3 buckets**, with a Postgres-backed Iceberg SQL catalog.
+
+**Key Patterns:**
+- Per-tenant S3 bucket + namespace `tenant_{slug}.raw`
+- `iceberg_catalog.get_catalog_for_tenant()` helper
+- Three pipeline templates: `extract` (append/replace), `merge`, `scd2`
+- Plain-language wizard → `write_disposition` mapping
+- Dagster `DltAssetBuilder` subprocess runner
+- Forbidden-pattern validators (no hard-coded creds, no `os.system`, namespace must match tenant)
+
+**⚠️ CRITICAL:** Replaces all PySpark ingestion. See [.github/instructions/MIGRATION_SPARK_TO_DLT.md](../instructions/MIGRATION_SPARK_TO_DLT.md).
 
 ---
 
@@ -133,8 +154,8 @@ dag_config = DagConfig(
     dag_id="daily_orders_pipeline",
     schedule_interval=ScheduleInterval.DAILY,
     tasks=[
-        PySparkTaskConfig(task_id="load_orders", job_path="..."),
-        DbtTaskConfig(task_id="transform_orders", model_name="orders")
+        DltRunTaskConfig(task_id="load_orders", pipeline_id="..."),
+        DbtRunTaskConfig(task_id="transform_orders", models=["orders"])
     ]
 )
 dag_service.create_dag(dag_config)

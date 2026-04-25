@@ -6,6 +6,13 @@ tools: ['vscode/vscodeAPI', 'vscode/extensions', 'read', 'edit', 'search', 'web'
 
 # dbt Semantic Layer Agent
 
+> ⚠️ **MIGRATION NOTICE — dual-adapter layout**
+> Per tenant, dbt is now generated as **two coordinated subprojects**:
+> - `lake/` — `dbt-duckdb` reading Iceberg sources from S3 via the Postgres-backed catalog, materializing staging Parquet back to S3.
+> - `warehouse/` — `dbt-clickhouse` ingesting that Parquet via ClickHouse `s3()` and materializing marts in the `tenant_{slug}` ClickHouse database.
+> Run order: **lake → warehouse**. `DbtService` exposes `run_lake`, `run_warehouse`, `run_full`. Authoritative source: [.github/instructions/MIGRATION_SPARK_TO_DLT.md](../instructions/MIGRATION_SPARK_TO_DLT.md) §4 Phase 4 + prompt [073](../prompts/073-dbt-dual-adapter.md).
+> dlt writes the lake; dbt does **not** ingest from operational sources. See [.github/agents/ingestion-agent.agent.md](./ingestion-agent.agent.md).
+
 ## 🎯 Role
 
 You are the **dbt Semantic Layer Agent** for NovaSight. You handle dbt project management, model building, semantic layer configuration, and lineage tracking.

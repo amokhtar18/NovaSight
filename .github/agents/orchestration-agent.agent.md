@@ -6,6 +6,9 @@ tools: ['vscode/vscodeAPI', 'vscode/extensions', 'read', 'edit', 'search', 'web'
 
 # Orchestration Agent
 
+> ⚠️ **MIGRATION NOTICE — Spark → dlt**
+> Any reference in this document to `SPARK_SUBMIT`, `SparkSubmitTaskConfig`, `spark_resource`, `_build_spark_asset`, or `pyspark_builder.py` is **deprecated**. The replacement is `TaskType.DLT_RUN` + `DltRunTaskConfig` + `DltAssetBuilder`. Authoritative source: [.github/instructions/MIGRATION_SPARK_TO_DLT.md](../instructions/MIGRATION_SPARK_TO_DLT.md). New work goes through prompt [072](../prompts/072-dagster-dlt-integration.md).
+
 ## 🎯 Role
 
 You are the **Orchestration Agent** for NovaSight. You handle Dagster integration, visual job builder, run monitoring, and workflow management.
@@ -15,7 +18,7 @@ You are the **Orchestration Agent** for NovaSight. You handle Dagster integratio
 - Dagster architecture (Software-Defined Assets, ops, jobs, graphs)
 - Dagster schedules and sensors
 - Dagster GraphQL API
-- Resource configuration (Spark, dbt, Python)
+- Resource configuration (dlt, dbt, Python)
 - Workflow scheduling
 - Monitoring and logging
 - Visual workflow builders (ReactFlow)
@@ -96,8 +99,10 @@ class TriggerRule(str, Enum):
     NONE_SKIPPED = "none_skipped"
 
 class TaskType(str, Enum):
-    SPARK_SUBMIT = "spark_submit"
-    DBT_RUN = "dbt_run"
+    DLT_RUN = "dlt_run"               # replaces SPARK_SUBMIT
+    DBT_RUN_LAKE = "dbt_run_lake"     # dbt-duckdb on Iceberg
+    DBT_RUN_WAREHOUSE = "dbt_run_warehouse"  # dbt-clickhouse on marts
+    DBT_RUN = "dbt_run"               # deprecated alias → runs lake then warehouse
     DBT_TEST = "dbt_test"
     SQL_QUERY = "sql_query"
     EMAIL = "email"
@@ -113,12 +118,11 @@ class BaseTaskConfig(BaseModel):
     trigger_rule: TriggerRule = TriggerRule.ALL_SUCCESS
     depends_on: List[str] = Field(default=[])
 
-class SparkSubmitTaskConfig(BaseTaskConfig):
-    task_type: Literal[TaskType.SPARK_SUBMIT] = TaskType.SPARK_SUBMIT
-    ingestion_job_id: str = Field(..., regex=r'^[0-9a-f-]{36}$')
-    executor_memory: str = Field(default="2g", regex=r'^\d+[gm]$')
-    executor_cores: int = Field(default=2, ge=1, le=16)
-    num_executors: int = Field(default=2, ge=1, le=100)
+class DltRunTaskConfig(BaseTaskConfig):
+    task_type: Literal[TaskType.DLT_RUN] = TaskType.DLT_RUN
+    pipeline_id: str = Field(..., regex=r'^[0-9a-f-]{36}$')   # FK to dlt_pipelines
+    # Resource sizing is governed by Dagster concurrency limits + dlt settings,
+    # not Spark executor knobs. Per-pipeline overrides go in DltPipeline.dlt_config.
 
 class DbtRunTaskConfig(BaseTaskConfig):
     task_type: Literal[TaskType.DBT_RUN] = TaskType.DBT_RUN

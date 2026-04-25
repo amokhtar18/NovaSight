@@ -64,7 +64,7 @@ agents:
   # Template Engine Agent
   template-engine:
     model: opus 4.5
-    description: "Jinja2 templates for code generation (DAGs, PySpark, dbt)"
+    description: "Jinja2 templates for code generation (dlt pipelines, Dagster ops, dbt models)"
     file: ".github/agents/template-engine-agent.agent.md"
     capabilities:
       - jinja2_templates
@@ -83,6 +83,19 @@ agents:
       - schema_introspection
       - connection_pooling
       - credential_encryption
+
+  # Ingestion Agent (dlt + Iceberg)
+  ingestion:
+    model: sonnet 4.6
+    description: "dlt-based ingestion pipelines writing to per-tenant Apache Iceberg tables on S3"
+    file: ".github/agents/ingestion-agent.agent.md"
+    capabilities:
+      - dlt_pipelines
+      - iceberg_catalog
+      - per_tenant_s3_isolation
+      - extract_merge_scd2_strategies
+      - dagster_dlt_assets
+    critical: true  # Owns the Spark→dlt migration; tenant isolation is non-negotiable
 
   # dbt Agent
   dbt:
@@ -231,7 +244,7 @@ handoff_rules:
   # Template Engine tasks (SECURITY CRITICAL)
   - patterns:
       - "template|jinja2|code generation"
-      - "pyspark template|dag template|dbt template"
+      - "dlt template|dag template|dbt template"
       - "generate.*code|render.*template"
     target: template-engine
     prompts:
@@ -253,6 +266,22 @@ handoff_rules:
       - "013-data-source-connectors.md"
       - "014-data-source-api.md"
       - "015-data-source-ui.md"
+
+  # Ingestion tasks (dlt + Iceberg)
+  - patterns:
+      - "dlt|ingest|ingestion"
+      - "iceberg|data lake|object storage"
+      - "extract|merge|scd2|append|replace"
+      - "minio|s3 bucket"
+    target: ingestion
+    prompts:
+      - "070-spark-removal-foundation.md"
+      - "071-dlt-pipeline-service.md"
+      - "072-dagster-dlt-integration.md"
+      - "073-dbt-dual-adapter.md"
+      - "074-pipeline-wizard-frontend.md"
+      - "075-spark-removal-cutover.md"
+    require_review: true
 
   # dbt tasks
   - patterns:

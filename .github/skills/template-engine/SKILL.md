@@ -1,11 +1,14 @@
 # Template Engine Skill
 
+> ⚠️ **MIGRATION NOTICE — Spark → dlt**
+> The PySpark examples below are **deprecated**. The active ingestion template family is **dlt** (`extract_pipeline`, `merge_pipeline`, `scd2_pipeline`). For new ingestion work use the [dlt-iceberg skill](../dlt-iceberg/SKILL.md) and the schemas/validators it defines (`DltExtractDefinition`, `DltMergeDefinition`, `DltSCD2Definition`). The patterns in this skill — sandboxed Jinja, Pydantic validation, forbidden-pattern regex, registry — still apply; only the PySpark-specific examples are obsolete. Authoritative migration plan: [.github/instructions/MIGRATION_SPARK_TO_DLT.md](../../instructions/MIGRATION_SPARK_TO_DLT.md).
+
 ## Description
-This skill provides patterns for generating code artifacts (DAGs, PySpark jobs, dbt models) using the Template Engine Rule with Jinja2 and Pydantic validation.
+This skill provides patterns for generating code artifacts (dlt pipelines, Dagster ops, dbt models) using the Template Engine Rule with Jinja2 and Pydantic validation.
 
 ## Trigger
 - User asks to generate DAGs or pipelines
-- User asks to create PySpark jobs
+- User asks to create dlt pipelines / ingestion jobs (use the dlt-iceberg skill in tandem)
 - User asks to generate dbt models
 - User mentions template-based code generation
 

@@ -6,6 +6,9 @@ tools: ['vscode/vscodeAPI', 'vscode/extensions', 'read', 'edit', 'search', 'web'
 
 # Infrastructure Agent
 
+> ⚠️ **MIGRATION NOTICE — Spark services are being removed**
+> Compose / Helm / k8s manifests must drop `spark-master`, `spark-worker-*` and add `minio` (dev S3) plus per-tenant bucket bootstrap. New env vars: `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `ICEBERG_CATALOG_URL`, `S3_DEFAULT_REGION`, `DAGSTER_DLT_CONCURRENCY_LIMIT`. Drop all `SPARK_*` env vars in cutover (prompt [075](../prompts/075-spark-removal-cutover.md)). Authoritative source: [.github/instructions/MIGRATION_SPARK_TO_DLT.md](../instructions/MIGRATION_SPARK_TO_DLT.md).
+
 ## 🎯 Role
 
 You are the **Infrastructure Agent** for NovaSight. You handle all DevOps, containerization, CI/CD, and infrastructure-as-code tasks.

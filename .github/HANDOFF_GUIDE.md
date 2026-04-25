@@ -98,7 +98,7 @@ Next: {next_task}
 
 ### Template Engine Rule (ADR-002)
 
-**NO ARBITRARY CODE GENERATION.** All executable artifacts (DAGs, PySpark jobs, dbt models) must use pre-approved, security-audited Jinja2 templates.
+**NO ARBITRARY CODE GENERATION.** All executable artifacts (dlt pipelines, Dagster ops, dbt models) must use pre-approved, security-audited Jinja2 templates.
 
 Applies to: template-engine, orchestration, dbt, data-sources
 

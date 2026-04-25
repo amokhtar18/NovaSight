@@ -1,10 +1,18 @@
 ---
 name: "Template Engine Agent"
-description: "Jinja2 templates for code generation (jobs, PySpark, dbt)"
+description: "Jinja2 templates for code generation (dlt pipelines, Dagster ops, dbt models)"
 tools: ['vscode/vscodeAPI', 'vscode/extensions', 'read', 'edit', 'search', 'web']
 ---
 
 # Template Engine Agent
+
+> ⚠️ **MIGRATION NOTICE — Spark → dlt**
+> Examples in this file referencing `pyspark/`, `PYSPARK = "pyspark"`, or `generate_pyspark_job` are **deprecated and being removed**. The replacement template family is `templates/dlt/{extract,merge,scd2}_pipeline.py.j2` with validators in `dlt_schemas.py`.
+> Authoritative sources for the new design:
+> - [.github/instructions/MIGRATION_SPARK_TO_DLT.md](../instructions/MIGRATION_SPARK_TO_DLT.md)
+> - [.github/agents/ingestion-agent.agent.md](./ingestion-agent.agent.md)
+> - [.github/skills/dlt-iceberg/SKILL.md](../skills/dlt-iceberg/SKILL.md)
+> Treat any embedded PySpark code in this document as illustrative-only; do not extend it. New template work goes through prompts [071](../prompts/071-dlt-pipeline-service.md) and [073](../prompts/073-dbt-dual-adapter.md).
 
 ## 🎯 Role
 
@@ -31,9 +39,9 @@ You are the **Template Engine Agent** for NovaSight. You handle the core templat
 - Template registry service
 - Jinja2 sandboxed environment
 - Input validation framework
-- PySpark template library
+- **dlt pipeline template library** (`extract_pipeline`, `merge_pipeline`, `scd2_pipeline`)
 - Dagster job template library
-- dbt model template library
+- dbt model template library (lake + warehouse subprojects)
 - Artifact generation service
 - Template versioning
 - Generation audit trail
@@ -41,69 +49,65 @@ You are the **Template Engine Agent** for NovaSight. You handle the core templat
 ## 📁 Project Structure
 
 ```
-backend/app/
+backend/
 ├── templates/                   # Jinja2 code templates
-│   ├── __init__.py
-│   ├── registry.py              # Template registry
-│   ├── engine.py                # Rendering engine
+│   ├── dlt/                     # dlt pipeline templates (replaces pyspark/)
+│   │   ├── extract_pipeline.py.j2     # write_disposition: append | replace
+│   │   ├── merge_pipeline.py.j2       # write_disposition: merge (PK required)
+│   │   └── scd2_pipeline.py.j2        # write_disposition: scd2 (PK required)
 │   │
-│   ├── pyspark/                 # PySpark templates
-│   │   ├── base_job.py.j2
-│   │   ├── jdbc_reader.py.j2
-│   │   ├── clickhouse_writer.py.j2
-│   │   ├── scd_type1.py.j2
-│   │   ├── scd_type2.py.j2
-│   │   ├── incremental_load.py.j2
-│   │   ├── full_load.py.j2
-│   │   └── transformations.py.j2
+│   ├── dagster/                 # Dagster templates
+│   │   ├── job_base.py.j2
+│   │   ├── op_dlt_run.py.j2     # replaces op_spark_submit.py.j2
+│   │   ├── op_dbt_run.py.j2
+│   │   ├── op_dbt_test.py.j2
+│   │   ├── op_email.py.j2
+│   │   ├── op_http_sensor.py.j2
+│   │   ├── op_sql.py.j2
+│   │   └── op_python.py.j2
 │   │
-    ├── dagster/                 # Dagster templates
-    │   ├── job_base.py.j2
-    │   ├── op_spark_submit.py.j2
-    │   ├── op_dbt_run.py.j2
-    │   ├── op_dbt_test.py.j2
-    │   ├── op_email.py.j2
-    │   ├── op_http_sensor.py.j2
-    │   ├── op_sql.py.j2
-    │   └── op_python.py.j2
-│   │
-│   └── dbt/                     # dbt templates
-│       ├── model_base.sql.j2
-│       ├── model_incremental.sql.j2
-│       ├── model_snapshot.sql.j2
-│       ├── join_clause.sql.j2
-│       ├── cte_block.sql.j2
-│       ├── schema.yml.j2
-│       ├── sources.yml.j2
-│       └── properties.yml.j2
+│   └── dbt/                     # dbt templates (split lake/warehouse)
+│       ├── lake/
+│       │   ├── dbt_project.yml.j2
+│       │   ├── profiles.yml.j2          # dbt-duckdb + iceberg ext
+│       │   ├── sources.yml.j2           # Iceberg sources
+│       │   └── staging_external.sql.j2  # parquet output
+│       └── warehouse/
+│           ├── dbt_project.yml.j2
+│           ├── profiles.yml.j2          # dbt-clickhouse
+│           ├── sources.yml.j2           # CH s3() Parquet
+│           ├── model_base.sql.j2
+│           ├── model_incremental.sql.j2
+│           └── schema.yml.j2
 │
-├── schemas/                     # Validation schemas
-│   ├── __init__.py
-│   ├── base.py
-│   ├── pyspark_schemas.py
-│   ├── dagster_schemas.py
-│   └── dbt_schemas.py
-│
-└── services/
-    ├── template_service.py      # Template orchestration
-    ├── artifact_service.py      # File generation
-    └── validation_service.py    # Input validation
+└── app/
+    └── services/template_engine/
+        ├── engine.py                # Rendering engine (sandboxed)
+        ├── registry.py              # Template registry
+        ├── validator.py             # Pydantic validators
+        └── schemas/
+            ├── dlt_schemas.py       # replaces pyspark_schemas.py
+            ├── dagster_schemas.py
+            └── dbt_schemas.py
 ```
 
 ## 🔧 Core Implementation
 
+> The code samples below remain for reference; replace `PYSPARK` with `DLT` in any new work and use the dlt schemas defined in [.github/skills/dlt-iceberg/SKILL.md](../skills/dlt-iceberg/SKILL.md).
+
 ### Template Registry
 ```python
-# backend/app/templates/registry.py
+# backend/app/services/template_engine/registry.py
 from pathlib import Path
 from typing import Dict, Optional
 from dataclasses import dataclass
 from enum import Enum
 
 class TemplateType(Enum):
-    PYSPARK = "pyspark"
+    DLT = "dlt"           # primary ingestion family (replaces PYSPARK)
     DAGSTER = "dagster"
     DBT = "dbt"
+
 
 @dataclass
 class TemplateInfo:
