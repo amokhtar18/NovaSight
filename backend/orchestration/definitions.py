@@ -6,9 +6,10 @@ Main entry point for Dagster orchestration.
 Dynamically loads jobs and assets from database at startup.
 
 This unified module handles:
-1. PySpark extraction jobs with remote spark-submit
-2. DAG workflow scheduling
-3. Pipeline orchestration
+1. dlt extraction pipelines (new) - loads to Iceberg on S3
+2. PySpark extraction jobs (legacy) with remote spark-submit
+3. DAG workflow scheduling
+4. Pipeline orchestration
 """
 
 from dagster import Definitions, EnvVar
@@ -21,6 +22,10 @@ from orchestration.resources.database_resource import DatabaseResource
 from orchestration.resources.remote_spark_resource import (
     DynamicRemoteSparkResource,
 )
+# dlt assets and schedules (new)
+from orchestration.assets.dlt_builder import load_all_dlt_assets
+from orchestration.schedules.dlt_schedules import load_all_dlt_schedules
+# PySpark assets and schedules (legacy - to be removed in Phase 6)
 from orchestration.assets.pyspark_builder import load_all_pyspark_assets
 from orchestration.schedules.pyspark_schedules import load_all_pyspark_schedules
 from orchestration.jobs.dagster_job_builder import (
@@ -116,7 +121,12 @@ def load_all_schedules():
 # Load assets and schedules from database
 all_assets = load_all_tenant_assets()
 
-# Load PySpark assets from database
+# Load dlt assets from database (new - Iceberg/S3 pipelines)
+dlt_assets = load_all_dlt_assets()
+all_assets.extend(dlt_assets)
+logger.info(f"Loaded {len(dlt_assets)} dlt extraction assets")
+
+# Load PySpark assets from database (legacy - to be removed in Phase 6)
 pyspark_assets = load_all_pyspark_assets()
 all_assets.extend(pyspark_assets)
 logger.info(f"Loaded {len(pyspark_assets)} PySpark extraction/transformation assets")
@@ -124,7 +134,12 @@ logger.info(f"Loaded {len(pyspark_assets)} PySpark extraction/transformation ass
 # Load DAG schedules
 all_schedules = load_all_schedules()
 
-# Load PySpark schedules from database
+# Load dlt schedules from database (new)
+dlt_schedules = load_all_dlt_schedules()
+all_schedules.extend(dlt_schedules)
+logger.info(f"Loaded {len(dlt_schedules)} dlt pipeline schedules")
+
+# Load PySpark schedules from database (legacy - to be removed in Phase 6)
 pyspark_schedules = load_all_pyspark_schedules()
 all_schedules.extend(pyspark_schedules)
 logger.info(f"Loaded {len(pyspark_schedules)} PySpark job schedules")
