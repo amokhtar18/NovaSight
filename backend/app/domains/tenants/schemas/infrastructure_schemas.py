@@ -30,7 +30,7 @@ class BaseInfrastructureConfigSchema(Schema):
     service_type = fields.Str(
         required=True,
         validate=validate.OneOf(
-            ["clickhouse", "spark", "dagster", "ollama"]
+            ["clickhouse", "spark", "dagster", "ollama", "object_storage"]
         ),
         metadata={"description": "Infrastructure service type"},
     )
@@ -312,6 +312,112 @@ class OllamaConfigCreateSchema(BaseInfrastructureConfigSchema):
 
 
 # =====================================================
+# Object Storage (S3/MinIO) - for Iceberg data lake
+# =====================================================
+
+
+class S3StorageSettingsSchema(Schema):
+    """S3/MinIO object storage settings for Iceberg data lake."""
+
+    class Meta:
+        unknown = EXCLUDE
+
+    bucket = fields.Str(
+        required=True,
+        validate=[
+            validate.Length(min=3, max=63),
+            validate.Regexp(
+                r"^[a-z0-9][a-z0-9.-]*[a-z0-9]$",
+                error="Bucket name must be lowercase, start/end with alphanumeric, "
+                "and contain only lowercase letters, numbers, dots, and hyphens",
+            ),
+        ],
+        metadata={"description": "S3 bucket name for tenant data"},
+    )
+    region = fields.Str(
+        load_default="us-east-1",
+        validate=validate.Length(min=1, max=50),
+        metadata={"description": "AWS region or MinIO region"},
+    )
+    endpoint_url = fields.Str(
+        allow_none=True,
+        load_default=None,
+        validate=validate.URL(schemes=["http", "https"]),
+        metadata={
+            "description": "Custom S3 endpoint URL (required for MinIO, optional for AWS)"
+        },
+    )
+    access_key = fields.Str(
+        required=True,
+        load_only=True,
+        validate=validate.Length(min=1, max=128),
+        metadata={"description": "AWS access key ID or MinIO access key"},
+    )
+    secret_key = fields.Str(
+        required=True,
+        load_only=True,
+        validate=validate.Length(min=1, max=128),
+        metadata={"description": "AWS secret access key or MinIO secret key"},
+    )
+    prefix = fields.Str(
+        load_default="",
+        validate=validate.Length(max=512),
+        metadata={"description": "Key prefix within the bucket (optional)"},
+    )
+    kms_key_id = fields.Str(
+        allow_none=True,
+        load_default=None,
+        validate=validate.Length(max=256),
+        metadata={"description": "KMS key ID for server-side encryption (AWS only)"},
+    )
+    path_style = fields.Bool(
+        load_default=True,
+        metadata={
+            "description": "Use path-style URLs (required for MinIO, false for AWS)"
+        },
+    )
+
+
+class S3StorageConfigCreateSchema(BaseInfrastructureConfigSchema):
+    """Schema for creating S3/MinIO object storage configuration."""
+
+    service_type = fields.Str(
+        dump_default="object_storage",
+        load_default="object_storage",
+        validate=validate.Equal("object_storage"),
+    )
+    # Override host and port as not required for object storage
+    host = fields.Str(
+        load_default="",
+        validate=validate.Length(max=255),
+        metadata={"description": "Not used for object_storage (use endpoint_url in settings)"},
+    )
+    port = fields.Int(
+        load_default=443,
+        validate=validate.Range(min=1, max=65535),
+        metadata={"description": "Not used for object_storage"},
+    )
+    settings = fields.Nested(S3StorageSettingsSchema, required=True)
+
+    @validates_schema
+    def validate_s3_config(self, data, **kwargs):
+        """Validate S3 configuration."""
+        settings = data.get("settings", {})
+        
+        # Bucket name is required
+        if not settings.get("bucket"):
+            raise ValidationError(
+                {"settings": {"bucket": ["Bucket name is required"]}}
+            )
+        
+        # Tenant ID is required for object_storage (no global configs)
+        if not data.get("tenant_id"):
+            raise ValidationError(
+                {"tenant_id": ["Object storage configurations must be tenant-specific"]}
+            )
+
+
+# =====================================================
 # Generic CRUD schemas
 # =====================================================
 
@@ -353,7 +459,7 @@ class InfrastructureConfigTestSchema(Schema):
     config_id = fields.UUID(allow_none=True)
     service_type = fields.Str(
         validate=validate.OneOf(
-            ["clickhouse", "spark", "dagster", "ollama"]
+            ["clickhouse", "spark", "dagster", "ollama", "object_storage"]
         )
     )
     host = fields.Str(validate=validate.Length(min=1, max=255))
@@ -363,6 +469,16 @@ class InfrastructureConfigTestSchema(Schema):
     @validates_schema
     def validate_test_params(self, data, **kwargs):
         config_id = data.get("config_id")
+        service_type = data.get("service_type")
+        
+        # For object_storage, we only need service_type and settings
+        if service_type == "object_storage":
+            if not config_id and not data.get("settings"):
+                raise ValidationError(
+                    "Either config_id or settings is required for object_storage"
+                )
+            return
+        
         has_inline = all(
             [data.get("service_type"), data.get("host"), data.get("port")]
         )

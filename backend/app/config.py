@@ -61,6 +61,19 @@ class BaseConfig:
     DAGSTER_MAX_CONCURRENT_RUNS = int(os.getenv("DAGSTER_MAX_CONCURRENT_RUNS", "10"))
     DAGSTER_SPARK_CONCURRENCY_LIMIT = int(os.getenv("DAGSTER_SPARK_CONCURRENCY_LIMIT", "3"))
     DAGSTER_DBT_CONCURRENCY_LIMIT = int(os.getenv("DAGSTER_DBT_CONCURRENCY_LIMIT", "2"))
+    DAGSTER_DLT_CONCURRENCY_LIMIT = int(os.getenv("DAGSTER_DLT_CONCURRENCY_LIMIT", "5"))
+    
+    # Iceberg Catalog Configuration (Postgres-backed SQL catalog)
+    ICEBERG_CATALOG_URL = os.getenv(
+        "ICEBERG_CATALOG_URL",
+        os.getenv("DATABASE_URL", "postgresql://novasight:novasight@localhost:5432/novasight_platform")
+    )
+    
+    # Object Storage Configuration (S3/MinIO)
+    OBJECT_STORAGE_DEFAULT_REGION = os.getenv("S3_DEFAULT_REGION", "us-east-1")
+    MINIO_ENDPOINT_URL = os.getenv("MINIO_ENDPOINT_URL", "http://minio:9000")
+    MINIO_ROOT_USER = os.getenv("MINIO_ROOT_USER", "minioadmin")
+    MINIO_ROOT_PASSWORD = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
     
     # Ollama LLM Configuration
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")

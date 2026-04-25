@@ -159,6 +159,31 @@ services:
       - novasight-network
 
   # ============================================
+  # MinIO - S3-compatible Object Storage
+  # ============================================
+  minio:
+    image: minio/minio:latest
+    container_name: novasight-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO Console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+      - ./docker/minio/init-buckets.sh:/docker-entrypoint-initdb.d/init-buckets.sh:ro
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - novasight-network
+
+  # ============================================
   # Ollama - Local LLM
   # ============================================
   ollama:
@@ -191,6 +216,7 @@ services:
     environment:
       FLASK_ENV: development
       FLASK_DEBUG: "1"
+      APP_ENV: development
       DATABASE_URL: postgresql://novasight:novasight@postgres:5432/novasight_platform
       REDIS_URL: redis://redis:6379/0
       CLICKHOUSE_HOST: clickhouse
@@ -213,18 +239,29 @@ services:
       DAGSTER_MAX_CONCURRENT_RUNS: 10
       DAGSTER_SPARK_CONCURRENCY_LIMIT: 3
       DAGSTER_DBT_CONCURRENCY_LIMIT: 2
+      DAGSTER_DLT_CONCURRENCY_LIMIT: 5
       DAGSTER_COMPUTE_LOGS_DIR: /var/dagster/logs
       # Dagster resources configuration
       DBT_PROJECT_DIR: /app/dbt
       DBT_PROFILES_DIR: /app/dbt
+      # MinIO / Object Storage (for Iceberg data lake)
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ENDPOINT_URL: http://minio:9000
+      S3_DEFAULT_REGION: us-east-1
+      # Iceberg Catalog
+      ICEBERG_CATALOG_URL: postgresql://novasight:novasight@postgres:5432/novasight_platform
     volumes:
       - ./backend:/app
       - ./infrastructure/spark/jobs:/opt/spark/jobs
       - ./dbt:/app/dbt
+      - dlt_pipelines:/opt/dlt/pipelines
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
@@ -272,6 +309,10 @@ volumes:
     name: novasight-spark-data
   ollama_data:
     name: novasight-ollama-data
+  minio_data:
+    name: novasight-minio-data
+  dlt_pipelines:
+    name: novasight-dlt-pipelines
 
 # ============================================
 # Networks

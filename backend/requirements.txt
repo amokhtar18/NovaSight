@@ -101,3 +101,18 @@ gql[requests]>=3.5.0,<4.0.0
 
 # Process manager for running multiple services
 supervisor>=4.2.5
+
+# ============================================
+# dlt - Data Load Tool (Spark replacement)
+# ============================================
+dlt[clickhouse,filesystem,pyarrow,sql_database]==1.10.0
+
+# ============================================
+# Apache Iceberg - Data Lake Tables
+# ============================================
+pyiceberg[sql,s3fs]==0.9.0
+
+# ============================================
+# dbt DuckDB Adapter (for lake layer)
+# ============================================
+dbt-duckdb==1.9.1

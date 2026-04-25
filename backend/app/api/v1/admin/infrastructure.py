@@ -30,6 +30,7 @@ from app.domains.tenants.schemas.infrastructure_schemas import (
     ClickHouseConfigCreateSchema,
     SparkConfigCreateSchema,
     OllamaConfigCreateSchema,
+    S3StorageConfigCreateSchema,
 )
 from app.errors import ValidationError, NotFoundError
 from marshmallow import ValidationError as MarshmallowValidationError
@@ -42,6 +43,7 @@ CREATE_SCHEMAS = {
     'clickhouse': ClickHouseConfigCreateSchema,
     'spark': SparkConfigCreateSchema,
     'ollama': OllamaConfigCreateSchema,
+    'object_storage': S3StorageConfigCreateSchema,
 }
 
 
@@ -53,7 +55,7 @@ def list_infrastructure_configs():
     List all infrastructure configurations.
     
     Query Parameters:
-        - service_type: Filter by service type (clickhouse, spark, ollama)
+        - service_type: Filter by service type (clickhouse, spark, ollama, object_storage)
         - tenant_id: Filter by tenant ID
         - include_global: Include global configs (default: true)
         - page: Page number (default: 1)
