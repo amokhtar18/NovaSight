@@ -52,6 +52,11 @@ _register(
     "WriteMode", "SCDType", "CDCType",
 )
 _register(
+    "app.domains.ingestion.domain.models",
+    "DltPipeline", "DltPipelineStatus", "WriteDisposition",
+    "IncrementalCursorType",
+)
+_register(
     "app.domains.transformation.domain.models",
     "SemanticModel", "Dimension", "Measure", "Relationship",
     "DimensionType", "AggregationType", "ModelType",
@@ -104,13 +109,18 @@ __all__ = [
     "ResourcePermission",
     "RoleHierarchy",
     "role_permissions",
-    # PySpark models
+    # PySpark models (legacy)
     "PySparkApp",
     "PySparkAppStatus",
     "SourceType",
     "WriteMode",
     "SCDType",
     "CDCType",
+    # dlt Pipeline models (new)
+    "DltPipeline",
+    "DltPipelineStatus",
+    "WriteDisposition",
+    "IncrementalCursorType",
     # Data source models
     "DataSourceColumn",
     "DataSourceTable",

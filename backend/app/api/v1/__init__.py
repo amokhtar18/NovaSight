@@ -35,8 +35,11 @@ from app.domains.transformation.api import dbt_routes  # noqa: F401
 from app.domains.transformation.api import mcp_routes  # noqa: F401
 from app.domains.transformation.api import visual_model_routes  # noqa: F401
 
-# Compute domain routes (canonical)
+# Compute domain routes (canonical) - PySpark (legacy, to be removed in Phase 6)
 from app.domains.compute.api import pyspark_routes  # noqa: F401
+
+# Ingestion domain routes (canonical) - dlt pipelines (new)
+from app.domains.ingestion.api.dlt_routes import dlt_pipeline_bp  # noqa: F401
 
 # AI domain routes (canonical)
 from app.domains.ai.api import assistant_routes  # noqa: F401
@@ -54,3 +57,6 @@ api_v1_bp.register_blueprint(backup_bp)
 
 # Register Dagster proxy (orchestration endpoints)
 api_v1_bp.register_blueprint(dagster_proxy_bp)
+
+# Register dlt pipeline routes (ingestion)
+api_v1_bp.register_blueprint(dlt_pipeline_bp)
