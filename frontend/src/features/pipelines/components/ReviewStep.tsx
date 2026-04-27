@@ -31,12 +31,17 @@ export function ReviewStep({ state }: ReviewStepProps) {
 
   // Build preview request
   const handlePreviewCode = async () => {
+    const isFile = state.sourceKind === 'file'
     const request: PipelinePreviewRequest = {
-      connection_id: state.connectionId,
+      source_kind: state.sourceKind,
+      connection_id: isFile ? undefined : state.connectionId,
       source_type: state.sourceType,
-      source_schema: state.sourceSchema,
-      source_table: state.sourceTable,
-      source_query: state.sourceQuery,
+      source_schema: isFile ? undefined : state.sourceSchema,
+      source_table: isFile ? undefined : state.sourceTable,
+      source_query: isFile ? undefined : state.sourceQuery,
+      file_format: isFile ? state.fileFormat : undefined,
+      file_object_key: isFile ? state.fileObjectKey : undefined,
+      file_options: isFile ? (state.fileOptions ?? {}) : undefined,
       columns_config: state.columnsConfig.filter(c => c.include),
       primary_key_columns: state.primaryKeyColumns,
       incremental_cursor_column: state.incrementalCursorColumn,
@@ -69,12 +74,17 @@ export function ReviewStep({ state }: ReviewStepProps) {
   // Validation
   const validationErrors: string[] = []
   if (!state.name) validationErrors.push('Pipeline name is required')
-  if (!state.connectionId) validationErrors.push('Connection is required')
-  if (state.sourceType === 'table' && !state.sourceTable) {
-    validationErrors.push('Source table is required')
-  }
-  if (state.sourceType === 'query' && !state.sourceQuery) {
-    validationErrors.push('Source query is required')
+  if (state.sourceKind === 'file') {
+    if (!state.fileObjectKey) validationErrors.push('Uploaded file is required')
+    if (!state.fileFormat) validationErrors.push('File format is required')
+  } else {
+    if (!state.connectionId) validationErrors.push('Connection is required')
+    if (state.sourceType === 'table' && !state.sourceTable) {
+      validationErrors.push('Source table is required')
+    }
+    if (state.sourceType === 'query' && !state.sourceQuery) {
+      validationErrors.push('Source query is required')
+    }
   }
   if (selectedColumns.length === 0) {
     validationErrors.push('At least one column must be selected')
@@ -122,15 +132,19 @@ export function ReviewStep({ state }: ReviewStepProps) {
                 <p className="font-medium">{state.name || '(not set)'}</p>
               </div>
               <div>
-                <Label className="text-muted-foreground">Source Type</Label>
-                <p className="font-medium capitalize">{state.sourceType}</p>
+                <Label className="text-muted-foreground">Source Kind</Label>
+                <p className="font-medium capitalize">
+                  {state.sourceKind === 'file' ? 'File upload' : 'SQL database'}
+                </p>
               </div>
               <div>
                 <Label className="text-muted-foreground">Source</Label>
-                <p className="font-mono text-sm">
-                  {state.sourceType === 'table' 
-                    ? `${state.sourceSchema}.${state.sourceTable}`
-                    : 'Custom Query'
+                <p className="font-mono text-sm break-all">
+                  {state.sourceKind === 'file'
+                    ? `${state.fileOriginalName ?? state.fileObjectKey} (${state.fileFormat?.toUpperCase()})`
+                    : state.sourceType === 'table'
+                      ? `${state.sourceSchema}.${state.sourceTable}`
+                      : 'Custom Query'
                   }
                 </p>
               </div>
@@ -166,6 +180,19 @@ export function ReviewStep({ state }: ReviewStepProps) {
                 <Label className="text-muted-foreground">Iceberg Table</Label>
                 <p className="font-mono text-sm">
                   {state.icebergTableName || '(auto-generated)'}
+                </p>
+              </div>
+              <div>
+                <Label className="text-muted-foreground">Schedule</Label>
+                <p className="font-mono text-sm">
+                  {(() => {
+                    const opts = state.options || {}
+                    const cron = typeof opts.schedule_cron === 'string' ? opts.schedule_cron : ''
+                    const preset = typeof opts.schedule_preset === 'string' ? opts.schedule_preset : ''
+                    if (cron) return `cron: ${cron}`
+                    if (preset) return preset
+                    return 'manual (no schedule)'
+                  })()}
                 </p>
               </div>
             </div>

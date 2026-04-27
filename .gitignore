@@ -84,3 +84,7 @@ backend/build/
 # Security scan reports
 security/reports/*.html
 security/reports/*.json
+
+# Tenant file storage (user-uploaded data files)
+backend/file_storage/
+file_storage/

@@ -522,8 +522,13 @@ class DbtService:
         # ClickHouse connection (use existing env vars or defaults)
         if 'CLICKHOUSE_HOST' not in env:
             env['CLICKHOUSE_HOST'] = 'localhost'
-        if 'CLICKHOUSE_PORT' not in env:
-            env['CLICKHOUSE_PORT'] = '8123'
+        # dbt-clickhouse adapter speaks the HTTP protocol (port 8123 by
+        # default), while the rest of the platform (clickhouse-driver) uses
+        # the native protocol on port 9000. The container env typically sets
+        # CLICKHOUSE_PORT=9000 for the app — we must override it here so dbt
+        # connects on the HTTP port. Allow explicit DBT_CLICKHOUSE_PORT to
+        # win if a deployment ever needs a custom HTTP port.
+        env['CLICKHOUSE_PORT'] = env.get('DBT_CLICKHOUSE_PORT', '8123')
         if 'CLICKHOUSE_USER' not in env:
             env['CLICKHOUSE_USER'] = 'default'
         if 'CLICKHOUSE_PASSWORD' not in env:

@@ -21,10 +21,8 @@ from orchestration.resources.database_resource import DatabaseResource
 # dlt assets and schedules
 from orchestration.assets.dlt_builder import load_all_dlt_assets
 from orchestration.schedules.dlt_schedules import load_all_dlt_schedules
-from orchestration.jobs.dagster_job_builder import (
-    load_all_dagster_jobs,
-    load_all_schedules as load_job_schedules,
-)
+# dbt schedules
+from orchestration.schedules.dbt_schedules import load_all_dbt_schedules
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +109,64 @@ def load_all_schedules():
     return all_schedules
 
 
+def load_all_manual_jobs():
+    """
+    Build standalone Dagster job definitions for DAGs configured with a
+    MANUAL schedule type.
+
+    DAGs with CRON/PRESET schedules already have their job definition
+    registered via the ``ScheduleDefinition`` returned from
+    :func:`load_all_schedules`. MANUAL DAGs have no schedule, so we still
+    need to register a launchable job so the backend can call
+    ``LaunchRun`` against ``{full_dag_id}_job``.
+    """
+    all_manual_jobs = []
+
+    try:
+        import sys
+        sys.path.insert(0, '/app/backend')
+
+        from app import create_app
+        from app.domains.orchestration.domain.models import (
+            DagConfig, DagStatus, ScheduleType,
+        )
+        from app.domains.orchestration.infrastructure.schedule_factory import (
+            ScheduleFactory,
+        )
+
+        app = create_app()
+        with app.app_context():
+            manual_dags = DagConfig.query.filter(
+                DagConfig.status.in_([DagStatus.ACTIVE, DagStatus.PAUSED]),
+                DagConfig.schedule_type == ScheduleType.MANUAL,
+            ).all()
+
+            logger.info(
+                f"Loading manual-trigger jobs for {len(manual_dags)} DAG configurations"
+            )
+
+            for dag in manual_dags:
+                try:
+                    factory = ScheduleFactory(str(dag.tenant_id))
+                    job = factory.build_job_from_dag_config(dag)
+                    if job:
+                        all_manual_jobs.append(job)
+                        logger.info(
+                            f"Registered manual-trigger job for {dag.dag_id}"
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to build manual job for {dag.dag_id}: {e}"
+                    )
+
+    except Exception as e:
+        logger.warning(
+            f"Could not load manual-trigger jobs: {e}. Starting with none."
+        )
+
+    return all_manual_jobs
+
+
 # Load assets and schedules from database
 all_assets = load_all_tenant_assets()
 
@@ -127,14 +183,16 @@ dlt_schedules = load_all_dlt_schedules()
 all_schedules.extend(dlt_schedules)
 logger.info(f"Loaded {len(dlt_schedules)} dlt pipeline schedules")
 
-# Load Dagster jobs
-all_jobs = load_all_dagster_jobs()
-logger.info(f"Loaded {len(all_jobs)} Dagster jobs")
+# Load dbt schedules (per-tenant transformation runs)
+dbt_schedules = load_all_dbt_schedules()
+all_schedules.extend(dbt_schedules)
+logger.info(f"Loaded {len(dbt_schedules)} dbt transformation schedules")
 
-# Load job schedules
-job_schedules = load_job_schedules()
-all_schedules.extend(job_schedules)
-logger.info(f"Loaded {len(job_schedules)} job schedules")
+# Register launchable jobs for MANUAL-scheduled DAGs (so the backend can
+# trigger them via Dagster's LaunchRun mutation). DAGs with CRON/PRESET
+# schedules already register their job through ScheduleDefinition above.
+all_jobs = load_all_manual_jobs()
+logger.info(f"Loaded {len(all_jobs)} manual-trigger jobs")
 
 # Resource definitions
 resources = {

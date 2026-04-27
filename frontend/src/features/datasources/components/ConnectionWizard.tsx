@@ -16,36 +16,30 @@ import { cn } from '@/lib/utils'
 import { DataSourceTypeSelector } from './DataSourceTypeSelector'
 import { ConnectionForm } from './ConnectionForm'
 import { SchemaSelector } from './SchemaSelector'
-import { FileUploadStep } from './FileUploadStep'
 import { useTestNewConnection, useCreateDataSource } from '../hooks'
-import type { DatabaseType, ConnectionTestResult, FileUploadMetadata } from '@/types/datasource'
-import { DATABASE_TYPES, isFileBased } from '@/types/datasource'
+import type { DatabaseType, ConnectionTestResult } from '@/types/datasource'
 
-const DB_STEPS = [
+const STEPS = [
   { id: 'type', title: 'Select Type', description: 'Choose your data source' },
   { id: 'connection', title: 'Connection Details', description: 'Enter connection information' },
   { id: 'test', title: 'Test Connection', description: 'Verify the connection works' },
   { id: 'schema', title: 'Select Schema', description: 'Choose the database schema' },
 ]
 
-const FILE_STEPS = [
-  { id: 'type', title: 'Select Type', description: 'Choose your data source' },
-  { id: 'upload', title: 'Upload File', description: 'Upload and validate your file' },
-  { id: 'name', title: 'Name & Save', description: 'Give your connection a name' },
-]
+const connectionSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(100),
+  db_type: z.enum(['postgresql', 'mysql', 'oracle', 'sqlserver', 'mongodb', 'clickhouse'] as const),
+  host: z.string().optional(),
+  port: z.number().optional(),
+  database: z.string().optional(),
+  username: z.string().optional(),
+  password: z.string().optional(),
+  ssl_enabled: z.boolean().default(true),
+  service_name: z.string().optional(),
+  thick_mode: z.boolean().default(false),
+})
 
-  const connectionSchema = z.object({
-    name: z.string().min(1, 'Name is required').max(100),
-    db_type: z.enum(['postgresql', 'mysql', 'oracle', 'sqlserver', 'mongodb', 'clickhouse', 'flatfile', 'excel', 'sqlite'] as const),
-    host: z.string().optional(),
-    port: z.number().optional(),
-    database: z.string().optional(),
-    username: z.string().optional(),
-    password: z.string().optional(),
-    ssl_enabled: z.boolean().default(true),
-    service_name: z.string().optional(),
-    thick_mode: z.boolean().default(false),
-  })
+type ConnectionFormData = z.infer<typeof connectionSchema>
 
 interface ConnectionWizardProps {
   open: boolean
@@ -58,11 +52,6 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
   const [selectedType, setSelectedType] = useState<DatabaseType | null>(null)
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null)
   const [selectedSchemas, setSelectedSchemas] = useState<string[]>([])
-  const [uploadedMeta, setUploadedMeta] = useState<FileUploadMetadata | null>(null)
-  const [connectionName, setConnectionName] = useState('')
-
-  const fileMode = selectedType ? isFileBased(selectedType) : false
-  const steps = fileMode ? FILE_STEPS : DB_STEPS
 
   const testConnection = useTestNewConnection()
   const createDataSource = useCreateDataSource()
@@ -81,18 +70,15 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
     setSelectedType(type)
     form.setValue('db_type', type)
 
-    if (!isFileBased(type)) {
-      // Set default port based on type
-      const defaultPorts: Partial<Record<DatabaseType, number>> = {
-        postgresql: 5432,
-        mysql: 3306,
-        oracle: 1521,
-        sqlserver: 1433,
-        mongodb: 27017,
-        clickhouse: 9000,
-      }
-      form.setValue('port', defaultPorts[type] ?? 5432)
+    const defaultPorts: Record<DatabaseType, number> = {
+      postgresql: 5432,
+      mysql: 3306,
+      oracle: 1521,
+      sqlserver: 1433,
+      mongodb: 27017,
+      clickhouse: 9000,
     }
+    form.setValue('port', defaultPorts[type])
 
     setCurrentStep(1)
   }
@@ -100,21 +86,19 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
   // Build extra_params for database-specific options
   const buildExtraParams = (data: ConnectionFormData) => {
     const extra: Record<string, unknown> = {}
-    
-    // Oracle-specific options
+
     if (data.db_type === 'oracle') {
       if (data.thick_mode) extra.thick_mode = true
       if (data.service_name) extra.service_name = data.service_name
     }
-    
+
     return Object.keys(extra).length > 0 ? extra : undefined
   }
 
   const handleConnectionSubmit = async (data: ConnectionFormData) => {
     setTestResult(null)
-    setCurrentStep(2) // Move to test step to show loading/result
+    setCurrentStep(2)
     try {
-      // Include extra_params when testing connection
       const testData = {
         ...data,
         extra_params: buildExtraParams(data),
@@ -122,7 +106,6 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
       const result = await testConnection.mutateAsync(testData)
       setTestResult(result)
       if (result.success) {
-        // Move to schema selection step
         setCurrentStep(3)
       }
     } catch (error) {
@@ -136,35 +119,19 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
   const handleFinish = async () => {
     const data = form.getValues()
     try {
-      if (fileMode && uploadedMeta) {
-        // File-based source: send upload_token + optional overrides
-        const name = connectionName.trim() || uploadedMeta.file_name
-        await createDataSource.mutateAsync({
-          name,
-          db_type: selectedType!,
-          upload_token: uploadedMeta.upload_token,
-          extra_params: {
-            file_name: uploadedMeta.file_name,
-            file_size: uploadedMeta.file_size,
-            file_format: uploadedMeta.file_format,
-            file_hash: uploadedMeta.file_hash,
-          },
-        })
-      } else {
-        const extraParams = buildExtraParams(data) || {}
-        if (selectedSchemas.length > 0) {
-          extraParams.allowed_schemas = selectedSchemas
-        }
-        await createDataSource.mutateAsync({
-          ...data,
-          schema_name: selectedSchemas[0] || undefined,
-          extra_params: Object.keys(extraParams).length > 0 ? extraParams : undefined,
-        })
+      const extraParams = buildExtraParams(data) || {}
+      if (selectedSchemas.length > 0) {
+        extraParams.allowed_schemas = selectedSchemas
       }
+      await createDataSource.mutateAsync({
+        ...data,
+        schema_name: selectedSchemas[0] || undefined,
+        extra_params: Object.keys(extraParams).length > 0 ? extraParams : undefined,
+      })
       handleClose()
       onSuccess?.()
     } catch (error) {
-      // Error is handled by the mutation
+      // handled by the mutation
     }
   }
 
@@ -173,21 +140,11 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
     setSelectedType(null)
     setTestResult(null)
     setSelectedSchemas([])
-    setUploadedMeta(null)
-    setConnectionName('')
     form.reset()
     onOpenChange(false)
   }
 
   const canGoNext = () => {
-    if (fileMode) {
-      switch (currentStep) {
-        case 0: return selectedType !== null
-        case 1: return uploadedMeta !== null
-        case 2: return (connectionName.trim() || uploadedMeta?.file_name || '').length > 0
-        default: return true
-      }
-    }
     switch (currentStep) {
       case 0:
         return selectedType !== null
@@ -214,7 +171,7 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
 
         {/* Stepper */}
         <div className="flex items-center justify-between px-4 py-6">
-          {steps.map((step, index) => (
+          {STEPS.map((step, index) => (
             <div key={step.id} className="flex items-center">
               <div className="flex flex-col items-center">
                 <div
@@ -238,7 +195,7 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
                   <p className="text-xs text-muted-foreground hidden sm:block">{step.description}</p>
                 </div>
               </div>
-              {index < steps.length - 1 && (
+              {index < STEPS.length - 1 && (
                 <div
                   className={cn(
                     "h-[2px] w-12 mx-4 transition-colors",
@@ -259,46 +216,25 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
             />
           )}
 
-          {fileMode ? (
-            <>
-              {currentStep === 1 && selectedType && (
-                <FileUploadStep
-                  dbType={selectedType}
-                  uploadedMeta={uploadedMeta}
-                  onUploadComplete={setUploadedMeta}
-                />
-              )}
-              {currentStep === 2 && uploadedMeta && (
-                <FileNameStep
-                  defaultName={uploadedMeta.file_name}
-                  value={connectionName}
-                  onChange={setConnectionName}
-                />
-              )}
-            </>
-          ) : (
-            <>
-              {currentStep === 1 && (
-                <ConnectionForm form={form} onSubmit={handleConnectionSubmit} />
-              )}
+          {currentStep === 1 && (
+            <ConnectionForm form={form} onSubmit={handleConnectionSubmit} />
+          )}
 
-              {currentStep === 2 && (
-                <TestConnectionStep
-                  isLoading={testConnection.isPending}
-                  result={testResult}
-                  onRetry={() => handleConnectionSubmit(form.getValues())}
-                />
-              )}
+          {currentStep === 2 && (
+            <TestConnectionStep
+              isLoading={testConnection.isPending}
+              result={testResult}
+              onRetry={() => handleConnectionSubmit(form.getValues())}
+            />
+          )}
 
-              {currentStep === 3 && (
-                <SchemaSelector
-                  connectionData={form.getValues()}
-                  testResult={testResult}
-                  selectedSchemas={selectedSchemas}
-                  onSchemasChange={setSelectedSchemas}
-                />
-              )}
-            </>
+          {currentStep === 3 && (
+            <SchemaSelector
+              connectionData={form.getValues()}
+              testResult={testResult}
+              selectedSchemas={selectedSchemas}
+              onSchemasChange={setSelectedSchemas}
+            />
           )}
         </div>
 
@@ -312,10 +248,10 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
             Back
           </Button>
 
-          {currentStep < steps.length - 1 ? (
+          {currentStep < STEPS.length - 1 ? (
             <Button
               onClick={() => {
-                if (!fileMode && currentStep === 1) {
+                if (currentStep === 1) {
                   form.handleSubmit(handleConnectionSubmit)()
                 } else {
                   setCurrentStep(currentStep + 1)
@@ -330,7 +266,7 @@ export function ConnectionWizard({ open, onOpenChange, onSuccess }: ConnectionWi
                 </>
               ) : (
                 <>
-                  {!fileMode && currentStep === 1 ? 'Test Connection' : 'Next'}
+                  {currentStep === 1 ? 'Test Connection' : 'Next'}
                   <ChevronRight className="h-4 w-4 ml-1" />
                 </>
               )}
@@ -433,39 +369,6 @@ function TestConnectionStep({ isLoading, result, onRetry }: TestConnectionStepPr
           </Button>
         </>
       )}
-    </div>
-  )
-}
-
-interface FileNameStepProps {
-  defaultName: string
-  value: string
-  onChange: (v: string) => void
-}
-
-function FileNameStep({ defaultName, value, onChange }: FileNameStepProps) {
-  return (
-    <div className="space-y-4 py-6">
-      <div>
-        <h3 className="text-lg font-medium mb-1">Name this connection</h3>
-        <p className="text-sm text-muted-foreground">
-          Choose a friendly name for this data source. Defaults to the uploaded file name.
-        </p>
-      </div>
-      <div>
-        <label htmlFor="conn-name" className="text-sm font-medium">
-          Connection Name
-        </label>
-        <input
-          id="conn-name"
-          type="text"
-          value={value}
-          placeholder={defaultName}
-          onChange={(e) => onChange(e.target.value)}
-          className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          maxLength={100}
-        />
-      </div>
     </div>
   )
 }

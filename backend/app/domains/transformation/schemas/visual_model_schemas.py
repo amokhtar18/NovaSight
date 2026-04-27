@@ -55,6 +55,18 @@ class FreshnessPeriod(str, Enum):
     DAY = "day"
 
 
+class SourceKind(str, Enum):
+    """Where a staging model reads its raw data from.
+
+    - ``warehouse``: an existing ClickHouse table (``source()`` reference).
+    - ``iceberg``: an Iceberg table on the tenant's S3 bucket, read via
+      ClickHouse's native ``iceberg(...)`` table function. Always
+      materializes into the tenant's ClickHouse database.
+    """
+    WAREHOUSE = "warehouse"
+    ICEBERG = "iceberg"
+
+
 # ── Column & Join Configs ────────────────────────────────────
 
 
@@ -121,8 +133,13 @@ class VisualModelCreateRequest(BaseModel):
     materialization: MaterializationType = MaterializationType.VIEW
 
     # Source configuration (staging)
+    source_kind: SourceKind = SourceKind.WAREHOUSE
     source_name: Optional[str] = None
     source_table: Optional[str] = None
+    # Iceberg-only: full S3 URI of the Iceberg table (e.g.
+    # ``s3://tenant-bucket/iceberg/tenant_acme/raw/orders/``). Required
+    # when ``source_kind == 'iceberg'``.
+    iceberg_s3_uri: Optional[str] = None
     refs: List[str] = []                          # upstream model refs
 
     # Source models (intermediate/marts)
@@ -157,6 +174,20 @@ class VisualModelCreateRequest(BaseModel):
             raise ValueError('Model name must match ^[a-z][a-z0-9_]*$')
         return v
 
+    @validator('iceberg_s3_uri', always=True)
+    def validate_iceberg_uri(cls, v, values):
+        kind = values.get('source_kind')
+        if kind == SourceKind.ICEBERG:
+            if not v:
+                raise ValueError(
+                    "iceberg_s3_uri is required when source_kind='iceberg'"
+                )
+            if not v.startswith('s3://'):
+                raise ValueError(
+                    "iceberg_s3_uri must start with 's3://'"
+                )
+        return v
+
     def to_code_gen_config(self) -> Dict[str, Any]:
         """Convert to template context for code generation."""
         # Build source_models list from refs if not provided directly
@@ -175,8 +206,10 @@ class VisualModelCreateRequest(BaseModel):
             "description": self.description,
             "materialized": self.materialization.value,
             "schema": self.schema_name,
+            "source_kind": self.source_kind.value,
             "source_name": self.source_name,
             "source_table": self.source_table,
+            "iceberg_s3_uri": self.iceberg_s3_uri,
             "columns": [c.dict() for c in self.columns],
             "joins": [
                 {

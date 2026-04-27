@@ -85,6 +85,63 @@ export function ColumnSelector({ state, onStateChange }: ColumnSelectorProps) {
         </p>
       </div>
 
+      {/* Records preview (file-source pipelines) */}
+      {state.sourceKind === 'file' && (() => {
+        const rows = (state.fileOptions?.rows_preview as Array<Record<string, unknown>> | undefined) ?? []
+        const previewCols = (state.fileOptions?.columns_preview as string[] | undefined) ?? []
+        if (!rows.length || !previewCols.length) {
+          return (
+            <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+              No records preview is available for this file. Columns are inferred from the
+              file header. Rows will be visible after the first run.
+            </div>
+          )
+        }
+        const renderCell = (v: unknown): string => {
+          if (v === null || v === undefined) return ''
+          if (typeof v === 'object') {
+            try {
+              return JSON.stringify(v)
+            } catch {
+              return String(v)
+            }
+          }
+          return String(v)
+        }
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-medium">Records preview</Label>
+              <Badge variant="outline">First {rows.length} rows</Badge>
+            </div>
+            <ScrollArea className="border rounded-md max-h-[260px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {previewCols.map((c) => (
+                      <TableHead key={c} className="font-mono text-xs whitespace-nowrap">
+                        {c}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row, idx) => (
+                    <TableRow key={idx}>
+                      {previewCols.map((c) => (
+                        <TableCell key={c} className="font-mono text-xs whitespace-nowrap max-w-[240px] truncate">
+                          {renderCell(row[c])}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </div>
+        )
+      })()}
+
       {/* Search and bulk actions */}
       <div className="flex items-center justify-between">
         <div className="relative flex-1 max-w-sm">

@@ -208,7 +208,7 @@ export function PipelineList() {
           <p className="text-muted-foreground mb-4">
             Create your first data pipeline to start extracting data.
           </p>
-          <Button onClick={() => navigate('/pipelines/new')}>
+          <Button onClick={() => navigate('/app/pipelines/new')}>
             <Plus className="h-4 w-4 mr-2" />
             Create Pipeline
           </Button>
@@ -223,7 +223,7 @@ export function PipelineList() {
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <Link to={`/pipelines/${pipeline.id}`}>
+                      <Link to={`/app/pipelines/${pipeline.id}`}>
                         <CardTitle className="hover:underline cursor-pointer">
                           {pipeline.name}
                         </CardTitle>

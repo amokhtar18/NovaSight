@@ -231,11 +231,12 @@ class DagService:
 
     def _create_task(self, dag_config_id: str, task_data: Dict[str, Any]) -> TaskConfig:
         """Create a task configuration."""
-        task_type = task_data.get("task_type", "python_operator")
+        task_type = task_data.get("task_type", "dlt_run")
         try:
             task_type_enum = TaskType(task_type)
         except ValueError:
-            task_type_enum = TaskType.PYTHON_OPERATOR
+            # Default to DLT_RUN — the orchestrator only schedules dlt + dbt jobs.
+            task_type_enum = TaskType.DLT_RUN
 
         trigger_rule = task_data.get("trigger_rule", "all_success")
         try:

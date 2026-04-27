@@ -72,6 +72,17 @@ export interface VisualModelCreatePayload {
   source_table?: string
   refs?: string[]
 
+  /**
+   * Where the staging model reads from. Defaults to ``warehouse``
+   * (a dbt source on ClickHouse). When set to ``iceberg`` the model
+   * is rendered with a ClickHouse ``iceberg('s3://...')`` table function
+   * and ``iceberg_s3_uri`` is required. Materialization always lands in
+   * the tenant's ClickHouse database regardless of source kind.
+   */
+  source_kind?: 'warehouse' | 'iceberg'
+  /** Full ``s3://bucket/prefix/`` URI for the Iceberg table root. */
+  iceberg_s3_uri?: string
+
   // Source models (intermediate/marts)
   source_models?: VisualSourceModelConfig[]
 

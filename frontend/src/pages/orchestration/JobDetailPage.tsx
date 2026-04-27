@@ -38,6 +38,7 @@ import {
   RefreshCw,
   Zap,
   GitBranch,
+  Code2,
   Clock,
   Activity,
   ExternalLink,
@@ -210,9 +211,13 @@ export function JobDetailPage() {
               <Badge variant="outline" className="border-purple-400 text-purple-600">
                 <GitBranch className="mr-1 h-3 w-3" /> Pipeline
               </Badge>
+            ) : job.type === 'dbt' ? (
+              <Badge variant="outline" className="border-blue-400 text-blue-600">
+                <Code2 className="mr-1 h-3 w-3" /> dbt
+              </Badge>
             ) : (
               <Badge variant="outline" className="border-orange-400 text-orange-600">
-                <Zap className="mr-1 h-3 w-3" /> Spark
+                <Zap className="mr-1 h-3 w-3" /> dlt
               </Badge>
             )}
             {getStatusBadge(job.status)}

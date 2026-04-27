@@ -17,7 +17,11 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 logger = logging.getLogger(__name__)
 
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent.parent / "templates" / "dbt"
+TEMPLATES_DIR = (
+    Path(__file__).resolve().parent.parent.parent.parent.parent
+    / "templates"
+    / "dbt"
+)
 
 
 class DbtCodeGenerator:

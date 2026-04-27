@@ -208,7 +208,7 @@ class VisualModelService:
     def preview_sql(
         self, tenant_id: str, model_id: str
     ) -> GeneratedCodeResponse:
-        """Preview generated SQL/YAML without writing to disk."""
+        """Preview generated SQL/YAML for a saved model (no disk write)."""
         visual_model = self.get_model(tenant_id, model_id)
 
         config = visual_model.visual_config
@@ -224,6 +224,28 @@ class VisualModelService:
             sql=generated_sql,
             yaml=generated_yaml,
             model_name=visual_model.model_name,
+        )
+
+    def preview_from_request(
+        self, req: VisualModelCreateRequest
+    ) -> GeneratedCodeResponse:
+        """Preview generated SQL/YAML from a request payload (no DB / disk).
+
+        Used by the dbt Studio Model Builder to render the generated dbt
+        code before the model is persisted. ADR-002 still applies — the
+        same Jinja2 templates are used as in ``create_model``.
+        """
+        generated_sql = self.code_generator.generate_model_sql(
+            config=req.to_code_gen_config(),
+            layer=req.model_layer.value,
+        )
+        generated_yaml = self.code_generator.generate_schema_yaml(
+            config=req.to_schema_config(),
+        )
+        return GeneratedCodeResponse(
+            sql=generated_sql,
+            yaml=generated_yaml,
+            model_name=req.model_name,
         )
 
     def save_canvas_state(
@@ -319,6 +341,112 @@ class VisualModelService:
             {"name": row[0], "type": row[1], "comment": row[2]}
             for row in result.rows
         ]
+
+    # ── Iceberg Lake Introspection ───────────────────────────
+
+    def list_lake_tables(self, tenant_id: str) -> List[Dict]:
+        """List Iceberg tables available to the tenant.
+
+        Sources are derived from the tenant's ``DltPipeline`` records:
+        every successful pipeline run produces an Iceberg table at
+        ``s3://<bucket>/iceberg/<namespace>/<table>``. dbt Studio
+        consumes these as raw inputs via ClickHouse's native
+        ``iceberg(...)`` table function.
+        """
+        from app.domains.ingestion.domain.models import (
+            DltPipeline,
+            DltPipelineStatus,
+        )
+        from app.domains.tenants.infrastructure.config_service import (
+            InfrastructureConfigService,
+        )
+        from app.domains.tenants.domain.models import Tenant
+
+        # Resolve tenant slug
+        tenant = Tenant.query.get(tenant_id)
+        if not tenant:
+            return []
+        safe_slug = tenant.slug.replace("-", "_").replace(".", "_")
+
+        # Resolve the tenant's S3 bucket so we can build full URIs
+        bucket: Optional[str] = None
+        endpoint_url: Optional[str] = None
+        try:
+            cfg_service = InfrastructureConfigService()
+            configs = cfg_service.list_configs(
+                service_type="object_storage",
+                tenant_id=tenant_id,
+                include_global=False,
+                page=1,
+                per_page=1,
+            )
+            if configs.get("items"):
+                settings = configs["items"][0].get("settings", {})
+                decrypted = cfg_service.decrypt_settings(
+                    settings, "object_storage"
+                )
+                bucket = decrypted.get("bucket") or None
+                endpoint_url = decrypted.get("endpoint_url") or None
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning(
+                "Could not load tenant S3 config for lake listing: %s", exc
+            )
+
+        # Fallback to the deterministic per-tenant bucket name used by
+        # provisioning when no explicit object_storage config is found.
+        # Without this, ``s3_uri`` would be null and the dbt Studio
+        # Iceberg validator would reject every model.
+        if not bucket:
+            import re as _re
+            bucket = f"novasight-{_re.sub(r'[^a-z0-9-]', '-', tenant.slug.lower())}"
+
+        # List ingestion pipelines that have produced data
+        pipelines = (
+            DltPipeline.query
+            .filter(DltPipeline.tenant_id == tenant_id)
+            .filter(
+                DltPipeline.status.in_([
+                    DltPipelineStatus.ACTIVE,
+                    DltPipelineStatus.ERROR,
+                ])
+            )
+            .all()
+        )
+
+        results: List[Dict] = []
+        for pipeline in pipelines:
+            namespace = (
+                pipeline.iceberg_namespace
+                or f"tenant_{safe_slug}.raw"
+            )
+            table_name = (
+                pipeline.iceberg_table_name
+                or pipeline.name.lower().replace(" ", "_").replace("-", "_")
+            )
+            # Build S3 URI; ClickHouse iceberg() expects the table root.
+            s3_uri = None
+            if bucket:
+                # Namespace `tenant_xyz.raw` → path segment `tenant_xyz/raw`
+                ns_path = namespace.replace(".", "/")
+                s3_uri = f"s3://{bucket}/iceberg/{ns_path}/{table_name}/"
+
+            results.append({
+                "pipeline_id": str(pipeline.id),
+                "pipeline_name": pipeline.name,
+                "namespace": namespace,
+                "table": table_name,
+                "s3_uri": s3_uri,
+                "endpoint_url": endpoint_url,
+                "status": pipeline.status.value,
+                "last_run_status": pipeline.last_run_status,
+                "last_run_at": (
+                    pipeline.last_run_at.isoformat()
+                    if pipeline.last_run_at else None
+                ),
+                "columns": pipeline.columns_config or [],
+            })
+
+        return results
 
     # ── Execution History ────────────────────────────────────
 

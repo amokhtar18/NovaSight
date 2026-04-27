@@ -23,6 +23,7 @@ from app.domains.ingestion.domain.models import (
     WriteDisposition,
     SourceType,
     IncrementalCursorType,
+    DltSourceKind,
 )
 from app.domains.ingestion.schemas.dlt_schemas import (
     DltPipelineCreate,
@@ -182,8 +183,17 @@ class DltPipelineService:
 
         # Auto-generate namespace and table name if not provided
         iceberg_namespace = data.iceberg_namespace or get_tenant_namespace(tenant.slug)
+
+        is_file = data.source_kind == DltSourceKind.FILE.value
+        # For file pipelines we derive the table name from the pipeline name
+        # (or the uploaded file name) since there is no source table.
+        default_table_seed = (
+            data.iceberg_table_name
+            or (None if is_file else data.source_table)
+            or data.name
+        )
         iceberg_table_name = data.iceberg_table_name or self._generate_table_name(
-            data.source_table or data.name
+            default_table_seed
         )
 
         # Convert columns_config to dict
@@ -191,14 +201,18 @@ class DltPipelineService:
 
         pipeline = DltPipeline(
             tenant_id=tenant_id,
-            connection_id=data.connection_id,
+            connection_id=data.connection_id if not is_file else None,
             name=data.name,
             description=data.description,
             status=DltPipelineStatus.DRAFT,
+            source_kind=data.source_kind,
             source_type=SourceType(data.source_type),
             source_schema=data.source_schema,
             source_table=data.source_table,
             source_query=data.source_query,
+            file_format=data.file_format if is_file else None,
+            file_object_key=data.file_object_key if is_file else None,
+            file_options=(data.file_options or {}) if is_file else {},
             columns_config=columns_config,
             primary_key_columns=data.primary_key_columns,
             incremental_cursor_column=data.incremental_cursor_column,
@@ -349,27 +363,36 @@ class DltPipelineService:
         if not tenant:
             raise DltPipelineValidationError("Tenant not found")
 
+        source_kind = data.source_kind or DltSourceKind.SQL.value
+        is_file = source_kind == DltSourceKind.FILE.value
+
         # Build context
         context = self._build_template_context(
             tenant=tenant,
             pipeline_id="preview",
             pipeline_name="preview_pipeline",
-            connection_id=data.connection_id,
+            connection_id=data.connection_id if not is_file else None,
+            source_kind=source_kind,
             source_type=data.source_type,
             source_schema=data.source_schema,
             source_table=data.source_table,
             source_query=data.source_query,
+            file_format=data.file_format if is_file else None,
+            file_object_key=data.file_object_key if is_file else None,
+            file_options=(data.file_options or {}) if is_file else {},
             columns=[col.name for col in data.columns_config if col.include],
             primary_key_columns=data.primary_key_columns,
             incremental_cursor_column=data.incremental_cursor_column,
             write_disposition=data.write_disposition,
             iceberg_table_name=data.iceberg_table_name or self._generate_table_name(
-                data.source_table or "preview"
+                (data.source_table if not is_file else None) or "preview"
             ),
         )
 
         # Determine template
-        if data.write_disposition == "scd2":
+        if is_file:
+            template_name = "dlt/file_pipeline.py.j2"
+        elif data.write_disposition == "scd2":
             template_name = "dlt/scd2_pipeline.py.j2"
         elif data.write_disposition == "merge":
             template_name = "dlt/merge_pipeline.py.j2"
@@ -449,9 +472,14 @@ class DltPipelineService:
         """
         pipeline = self.get_pipeline(pipeline_id, tenant_id)
 
-        if pipeline.status != DltPipelineStatus.ACTIVE:
+        # Allow runs for ACTIVE pipelines and for pipelines that previously
+        # failed (ERROR). A manual/scheduled trigger is itself the user's
+        # "retry" signal — they don't need to re-activate first.
+        runnable_states = {DltPipelineStatus.ACTIVE, DltPipelineStatus.ERROR}
+        if pipeline.status not in runnable_states:
             raise DltPipelineValidationError(
-                "Pipeline must be active to run. Call activate first."
+                f"Pipeline must be active to run (current status: "
+                f"{pipeline.status.value}). Activate the pipeline first."
             )
 
         # TODO: Integration with Dagster in Phase 3 (Prompt 072)
@@ -517,10 +545,14 @@ class DltPipelineService:
             pipeline_id=str(pipeline.id),
             pipeline_name=pipeline.name,
             connection_id=pipeline.connection_id,
-            source_type=pipeline.source_type.value,
+            source_kind=pipeline.source_kind or DltSourceKind.SQL.value,
+            source_type=pipeline.source_type.value if pipeline.source_type else "table",
             source_schema=pipeline.source_schema,
             source_table=pipeline.source_table,
             source_query=pipeline.source_query,
+            file_format=pipeline.file_format,
+            file_object_key=pipeline.file_object_key,
+            file_options=pipeline.file_options or {},
             columns=pipeline.get_column_names(),
             primary_key_columns=pipeline.primary_key_columns,
             incremental_cursor_column=pipeline.incremental_cursor_column,
@@ -536,20 +568,27 @@ class DltPipelineService:
         tenant,
         pipeline_id: str,
         pipeline_name: str,
-        connection_id: UUID,
-        source_type: str,
-        source_schema: Optional[str],
-        source_table: Optional[str],
-        source_query: Optional[str],
-        columns: List[str],
-        primary_key_columns: List[str],
-        incremental_cursor_column: Optional[str],
-        write_disposition: str,
-        iceberg_table_name: str,
+        connection_id: Optional[UUID],
+        source_kind: str = "sql",
+        source_type: str = "table",
+        source_schema: Optional[str] = None,
+        source_table: Optional[str] = None,
+        source_query: Optional[str] = None,
+        file_format: Optional[str] = None,
+        file_object_key: Optional[str] = None,
+        file_options: Optional[Dict[str, Any]] = None,
+        columns: Optional[List[str]] = None,
+        primary_key_columns: Optional[List[str]] = None,
+        incremental_cursor_column: Optional[str] = None,
+        write_disposition: str = "append",
+        iceberg_table_name: str = "",
     ) -> Dict[str, Any]:
         """Build template rendering context."""
-        # Get connection string (will be injected via env vars in actual run)
-        source_connection_string = "${SOURCE_CONNECTION_STRING}"
+        # Connection string is injected at runtime via the SOURCE_CONNECTION_STRING
+        # environment variable. The default rendered into the generated code is
+        # intentionally empty (a non-shell-expanding placeholder) so it does not
+        # trip the template engine's injection-pattern security check.
+        source_connection_string = ""
 
         # Get S3 config
         s3_config = self._get_tenant_s3_config(tenant.id)
@@ -570,15 +609,21 @@ class DltPipelineService:
             ),
             "iceberg_namespace": get_tenant_namespace(tenant.slug),
             "iceberg_table_name": iceberg_table_name,
-            # Source config
+            # Source kind discriminator
+            "source_kind": source_kind,
+            # SQL-source config
             "source_connection_string": source_connection_string,
             "source_type": source_type,
             "source_schema": source_schema or "",
             "source_table": source_table or "",
             "source_query": source_query or "",
+            # File-source config
+            "file_format": file_format or "",
+            "file_object_key": file_object_key or "",
+            "file_options": file_options or {},
             # Column config
-            "columns": columns,
-            "primary_key_columns": primary_key_columns,
+            "columns": columns or [],
+            "primary_key_columns": primary_key_columns or [],
             "incremental_cursor_column": incremental_cursor_column,
             # Write config
             "write_disposition": write_disposition,
@@ -607,8 +652,11 @@ class DltPipelineService:
         """Validate generated code for security issues."""
         errors = []
 
-        # Check namespace ownership
-        expected_namespace = f"tenant_{tenant_slug}"
+        # Check namespace ownership. Tenant slugs may contain hyphens,
+        # but Iceberg namespaces / Python identifiers use underscores
+        # (see ``get_tenant_namespace``), so sanitize before matching.
+        safe_slug = re.sub(r"[^a-z0-9_]", "_", tenant_slug.lower())
+        expected_namespace = f"tenant_{safe_slug}"
         if expected_namespace not in code:
             errors.append(f"Generated code does not reference expected namespace {expected_namespace}")
 

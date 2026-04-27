@@ -226,23 +226,22 @@ class TestAssetFactory:
         assert factory.tenant_id == "test-tenant"
 
     def test_build_assets_from_dag_config(self):
-        """Test building assets from a mock DagConfig."""
+        """Test building assets from a mock DagConfig (dlt task)."""
         from app.domains.orchestration.infrastructure.asset_factory import AssetFactory
         from app.domains.orchestration.domain.models import TaskType
-        
+
         factory = AssetFactory("test-tenant")
-        
-        # Create mock DagConfig
+
         mock_task = Mock()
-        mock_task.task_id = "spark_task"
-        mock_task.task_type = TaskType.SPARK_SUBMIT
-        mock_task.config = {"spark_app_path": "/app/jobs/test.py"}
+        mock_task.task_id = "dlt_task"
+        mock_task.task_type = TaskType.DLT_RUN
+        mock_task.config = {"pipeline_id": "00000000-0000-0000-0000-000000000001"}
         mock_task.depends_on = []
-        
+
         mock_dag = Mock()
         mock_dag.dag_id = "test_dag"
         mock_dag.tasks = [mock_task]
-        
+
         assets = factory.build_assets_from_dag_config(mock_dag)
         assert len(assets) == 1
 
@@ -270,29 +269,73 @@ class TestAssetFactory:
         """Test that task dependencies become asset dependencies."""
         from app.domains.orchestration.infrastructure.asset_factory import AssetFactory
         from app.domains.orchestration.domain.models import TaskType
-        from dagster import AssetKey
-        
+
         factory = AssetFactory("test-tenant")
-        
-        # Create two tasks with dependency
+
+        # Two dlt tasks chained — extract → transform
         mock_task1 = Mock()
         mock_task1.task_id = "extract"
-        mock_task1.task_type = TaskType.SQL_QUERY
-        mock_task1.config = {"query": "SELECT * FROM source"}
+        mock_task1.task_type = TaskType.DLT_RUN
+        mock_task1.config = {"pipeline_id": "00000000-0000-0000-0000-000000000001"}
         mock_task1.depends_on = []
-        
+
         mock_task2 = Mock()
         mock_task2.task_id = "transform"
-        mock_task2.task_type = TaskType.SQL_QUERY
-        mock_task2.config = {"query": "SELECT * FROM staging"}
+        mock_task2.task_type = TaskType.DBT_RUN
+        mock_task2.config = {"models": ["staging.*"]}
         mock_task2.depends_on = ["extract"]
-        
+
         mock_dag = Mock()
         mock_dag.dag_id = "etl_pipeline"
         mock_dag.tasks = [mock_task1, mock_task2]
-        
+
         assets = factory.build_assets_from_dag_config(mock_dag)
         assert len(assets) == 2
+
+    def test_only_dlt_and_dbt_task_types_supported(self):
+        """Scheduler must reject any task type that is not dlt or dbt."""
+        from app.domains.orchestration.infrastructure.asset_factory import (
+            AssetFactory,
+            ALLOWED_TASK_TYPES,
+        )
+
+        factory = AssetFactory("test-tenant")
+
+        # Allowed set is exactly the dlt + dbt task types.
+        assert ALLOWED_TASK_TYPES == frozenset({
+            "dlt_run",
+            "dbt_run",
+            "dbt_test",
+            "dbt_run_lake",
+            "dbt_run_warehouse",
+        })
+
+        # An unknown / legacy task type produces zero assets.
+        legacy_task = Mock()
+        legacy_task.task_id = "legacy"
+        legacy_task.task_type = Mock()
+        legacy_task.task_type.value = "spark_submit"
+        legacy_task.config = {}
+        legacy_task.depends_on = []
+
+        mock_dag = Mock()
+        mock_dag.dag_id = "legacy_dag"
+        mock_dag.tasks = [legacy_task]
+
+        assert factory.build_assets_from_dag_config(mock_dag) == []
+
+    def test_task_type_enum_only_contains_dlt_and_dbt(self):
+        """Domain TaskType enum is restricted to dlt + dbt members."""
+        from app.domains.orchestration.domain.models import TaskType
+
+        names = {member.name for member in TaskType}
+        assert names == {
+            "DLT_RUN",
+            "DBT_RUN",
+            "DBT_TEST",
+            "DBT_RUN_LAKE",
+            "DBT_RUN_WAREHOUSE",
+        }
 
 
 class TestScheduleFactory:

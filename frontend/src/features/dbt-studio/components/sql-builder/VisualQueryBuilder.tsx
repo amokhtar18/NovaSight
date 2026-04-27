@@ -5,21 +5,35 @@
  * and emits a VisualModelCreatePayload on save.
  */
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { Save, Eye, Code } from 'lucide-react'
+import { Database, Layers, Save, Eye, Code } from 'lucide-react'
 import { SelectBuilder } from './SelectBuilder'
 import { JoinBuilder } from './JoinBuilder'
 import { WhereBuilder } from './WhereBuilder'
 import { GroupByBuilder } from './GroupByBuilder'
 import { SavedQueryPicker } from '../shared/SavedQueryPicker'
 import type { SavedQuery } from '../../hooks/useDbtSavedQueries'
+import {
+  useWarehouseSchemas,
+  useWarehouseTables,
+  useLakeTables,
+} from '../../hooks/useWarehouseSchema'
 import type {
   VisualModelCreatePayload,
   VisualColumnConfig,
@@ -39,6 +53,10 @@ export interface VisualQueryBuilderProps {
   selectedSourceSchema?: string
   /** Auto-fill source table from Schema Explorer selection. */
   selectedSourceTable?: string
+  /** Notify parent when source schema is changed via the dropdown. */
+  onSchemaChange?: (schema: string) => void
+  /** Notify parent when source table is changed via the dropdown. */
+  onTableChange?: (table: string) => void
   /** Called when user saves the model configuration. */
   onSave: (payload: VisualModelCreatePayload) => void
   /** Called when user requests code preview. */
@@ -53,6 +71,8 @@ export function VisualQueryBuilder({
   initialValues,
   selectedSourceSchema,
   selectedSourceTable,
+  onSchemaChange,
+  onTableChange,
   onSave,
   onPreview,
   isSaving = false,
@@ -78,6 +98,9 @@ export function VisualQueryBuilder({
   const [tags, setTags] = useState(initialValues?.tags?.join(', ') || '')
   const [referenceSql, setReferenceSql] = useState<string | null>(null)
   const [referenceSource, setReferenceSource] = useState<string | null>(null)
+  // Whether the currently selected source is an Iceberg lake namespace or
+  // a ClickHouse warehouse schema. Drives column resolution below.
+  const [sourceKind, setSourceKind] = useState<'warehouse' | 'lake'>('warehouse')
 
   // Auto-fill source from Schema Explorer selection
   useEffect(() => {
@@ -86,6 +109,86 @@ export function VisualQueryBuilder({
   useEffect(() => {
     if (selectedSourceTable) setSourceTable(selectedSourceTable)
   }, [selectedSourceTable])
+
+  // Warehouse + Iceberg introspection for the source dropdowns
+  const { data: warehouseSchemas = [] } = useWarehouseSchemas()
+  const { data: warehouseTables = [] } = useWarehouseTables(
+    sourceKind === 'warehouse' && sourceName ? sourceName : undefined,
+  )
+  const { data: lakeTables = [] } = useLakeTables()
+
+  // Group lake tables by namespace so they render under their namespace
+  // header in the schema dropdown.
+  const lakeNamespaces = useMemo(() => {
+    const groups = new Map<string, typeof lakeTables>()
+    for (const t of lakeTables) {
+      const ns = t.namespace || 'default'
+      if (!groups.has(ns)) groups.set(ns, [])
+      groups.get(ns)!.push(t)
+    }
+    return Array.from(groups.entries()).map(([namespace, tables]) => ({
+      namespace,
+      tables,
+    }))
+  }, [lakeTables])
+
+  // Tables to render in the table dropdown depend on the selected source kind.
+  const tableOptions = useMemo(() => {
+    if (!sourceName) return [] as Array<{ name: string; subtitle?: string }>
+    if (sourceKind === 'lake') {
+      return lakeTables
+        .filter((t) => (t.namespace || 'default') === sourceName)
+        .map((t) => ({
+          name: t.table,
+          subtitle: t.s3_uri || undefined,
+        }))
+    }
+    return warehouseTables.map((t) => ({
+      name: t.name,
+      subtitle: t.engine,
+    }))
+  }, [sourceKind, sourceName, warehouseTables, lakeTables])
+
+  // Columns available to the SELECT/WHERE/GROUP BY builders.
+  // For Iceberg sources the Lake API returns columns inline on the table
+  // descriptor, so we map them to the WarehouseColumn shape here. For
+  // ClickHouse sources we fall back to the parent-supplied list (which is
+  // populated via ``useWarehouseColumns``).
+  const effectiveAvailableColumns = useMemo<WarehouseColumn[]>(() => {
+    if (sourceKind === 'lake' && sourceName && sourceTable) {
+      const t = lakeTables.find(
+        (x) =>
+          (x.namespace || 'default') === sourceName && x.table === sourceTable,
+      )
+      if (t && t.columns?.length) {
+        return t.columns.map((c) => ({
+          name: c.name,
+          type: c.type || 'String',
+          comment: c.description || '',
+        }))
+      }
+      return []
+    }
+    return availableColumns
+  }, [sourceKind, sourceName, sourceTable, lakeTables, availableColumns])
+
+  // Encoded values for the schema dropdown: ``wh::<schema>`` or ``lake::<ns>``
+  const schemaSelectValue =
+    sourceName ? `${sourceKind === 'lake' ? 'lake' : 'wh'}::${sourceName}` : undefined
+
+  const handleSchemaSelect = (encoded: string) => {
+    const [kind, ...rest] = encoded.split('::')
+    const name = rest.join('::')
+    setSourceKind(kind === 'lake' ? 'lake' : 'warehouse')
+    setSourceName(name)
+    setSourceTable('')
+    onSchemaChange?.(name)
+  }
+
+  const handleTableSelect = (value: string) => {
+    setSourceTable(value)
+    onTableChange?.(value)
+  }
 
   // Loading a saved query pre-fills model metadata and keeps the raw
   // SQL as a read-only reference. The raw SQL is NOT injected into the
@@ -103,20 +206,48 @@ export function VisualQueryBuilder({
     if (!tags && q.tags.length > 0) setTags(q.tags.join(', '))
   }, [modelName, description, tags])
 
-  const buildPayload = useCallback((): VisualModelCreatePayload => ({
-    model_name: modelName,
-    model_layer: layer,
+  const buildPayload = useCallback((): VisualModelCreatePayload => {
+    const lakeMatch =
+      sourceKind === 'lake'
+        ? lakeTables.find(
+            (t) => t.namespace === sourceName && t.table === sourceTable,
+          )
+        : undefined
+    return {
+      model_name: modelName,
+      model_layer: layer,
+      description,
+      materialization,
+      source_kind: sourceKind === 'lake' ? 'iceberg' : 'warehouse',
+      source_name: sourceName || undefined,
+      source_table: sourceTable || undefined,
+      iceberg_s3_uri:
+        sourceKind === 'lake' ? lakeMatch?.s3_uri ?? undefined : undefined,
+      columns,
+      joins,
+      where_clause: whereClause || undefined,
+      group_by: groupBy,
+      tags: tags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean),
+      refs: joins.map((j) => j.source_model),
+    }
+  }, [
+    modelName,
+    layer,
     description,
     materialization,
-    source_name: sourceName || undefined,
-    source_table: sourceTable || undefined,
+    sourceKind,
+    sourceName,
+    sourceTable,
+    lakeTables,
     columns,
     joins,
-    where_clause: whereClause || undefined,
-    group_by: groupBy,
-    tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
-    refs: joins.map((j) => j.source_model),
-  }), [modelName, layer, description, materialization, sourceName, sourceTable, columns, joins, whereClause, groupBy, tags])
+    whereClause,
+    groupBy,
+    tags,
+  ])
 
   return (
     <Card>
@@ -215,22 +346,103 @@ export function VisualQueryBuilder({
         {layer === 'staging' && (
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div className="space-y-1">
-              <Label className="text-xs">Source Name</Label>
-              <Input
-                value={sourceName}
-                onChange={(e) => setSourceName(e.target.value)}
-                placeholder="raw_data"
-                className="font-mono text-sm"
-              />
+              <Label className="text-xs">Source Schema</Label>
+              <Select value={schemaSelectValue} onValueChange={handleSchemaSelect}>
+                <SelectTrigger className="text-sm font-mono">
+                  <SelectValue placeholder="Select a source…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {warehouseSchemas.length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel className="flex items-center gap-1.5 text-[11px]">
+                        <Database className="h-3 w-3" />
+                        ClickHouse
+                      </SelectLabel>
+                      {warehouseSchemas.map((s: { name: string }) => (
+                        <SelectItem
+                          key={`wh::${s.name}`}
+                          value={`wh::${s.name}`}
+                          className="font-mono text-xs"
+                        >
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
+                  {warehouseSchemas.length > 0 && lakeNamespaces.length > 0 && (
+                    <SelectSeparator />
+                  )}
+                  {lakeNamespaces.length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel className="flex items-center gap-1.5 text-[11px]">
+                        <Layers className="h-3 w-3" />
+                        Iceberg lake
+                      </SelectLabel>
+                      {lakeNamespaces.map((g) => (
+                        <SelectItem
+                          key={`lake::${g.namespace}`}
+                          value={`lake::${g.namespace}`}
+                          className="font-mono text-xs"
+                        >
+                          {g.namespace}{' '}
+                          <span className="text-muted-foreground">
+                            ({g.tables.length})
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
+                  {warehouseSchemas.length === 0 && lakeNamespaces.length === 0 && (
+                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                      No sources available
+                    </div>
+                  )}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Source Table</Label>
-              <Input
-                value={sourceTable}
-                onChange={(e) => setSourceTable(e.target.value)}
-                placeholder="orders"
-                className="font-mono text-sm"
-              />
+              <Select
+                value={sourceTable || undefined}
+                onValueChange={handleTableSelect}
+                disabled={!sourceName}
+              >
+                <SelectTrigger className="text-sm font-mono">
+                  <SelectValue
+                    placeholder={
+                      sourceName ? 'Select a table…' : 'Pick a source first'
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {tableOptions.length === 0 ? (
+                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                      {sourceName
+                        ? sourceKind === 'lake'
+                          ? 'No Iceberg tables in this namespace'
+                          : 'No tables in this schema'
+                        : 'Pick a source first'}
+                    </div>
+                  ) : (
+                    tableOptions.map((t) => (
+                      <SelectItem
+                        key={t.name}
+                        value={t.name}
+                        className="font-mono text-xs"
+                      >
+                        <div className="flex flex-col">
+                          <span>{t.name}</span>
+                          {t.subtitle && (
+                            <span className="text-[10px] text-muted-foreground truncate">
+                              {t.subtitle}
+                            </span>
+                          )}
+                        </div>
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
             </div>
           </div>
         )}
@@ -257,7 +469,7 @@ export function VisualQueryBuilder({
 
           <TabsContent value="select" className="mt-3">
             <SelectBuilder
-              availableColumns={availableColumns}
+              availableColumns={effectiveAvailableColumns}
               selectedColumns={columns}
               onChange={setColumns}
             />

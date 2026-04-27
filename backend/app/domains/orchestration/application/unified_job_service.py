@@ -31,10 +31,11 @@ logger = logging.getLogger(__name__)
 
 class UnifiedJobService:
     """
-    Service for managing Dagster jobs with remote Spark execution.
-    
-    Replaces the separate DagService and PySparkDAGGenerator with a
-    unified interface for all job management operations.
+    Service for managing Dagster jobs.
+
+    Post Spark→dlt migration the orchestrator only schedules **dlt
+    pipelines and dbt runs/tests**. Spark / PySpark scheduling has been
+    removed.
     """
     
     def __init__(self, tenant_id: str):
@@ -157,7 +158,7 @@ class UnifiedJobService:
             schedule_type=schedule_type,
             schedule_cron=schedule_cron,
             schedule_preset=schedule_preset,
-            status=DagStatus.DRAFT,
+            status=DagStatus.ACTIVE,
             default_retries=retries,
             default_retry_delay_minutes=retry_delay_minutes,
             tags=["dlt", "pipeline", str(pipeline_id)],
@@ -252,7 +253,7 @@ class UnifiedJobService:
             schedule_type=schedule_type,
             schedule_cron=schedule_cron,
             schedule_preset=schedule_preset,
-            status=DagStatus.DRAFT,
+            status=DagStatus.ACTIVE,
             tags=["pipeline", "dlt"] + pipeline_ids,
             created_by=created_by or "system",
         )
@@ -289,7 +290,126 @@ class UnifiedJobService:
         self._register_job_with_dagster(dag_config)
         
         return self._dag_to_job_dict(dag_config)
-    
+
+    def create_dbt_job(
+        self,
+        kind: str,
+        profile: str = "default",
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        schedule: Optional[str] = None,
+        select: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        full_refresh: bool = False,
+        retries: int = 2,
+        retry_delay_minutes: int = 5,
+        created_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a Dagster job that runs ``dbt run`` or ``dbt test``.
+
+        Args:
+            kind: ``"run"`` or ``"test"``.
+            profile: ``"default"``, ``"lake"``, or ``"warehouse"``. Picks the
+                corresponding ``TaskType`` so AssetFactory wires the right
+                dbt CLI command (run-only; tests always use the default
+                profile chain).
+            select: Optional dbt ``--select`` expression.
+            tags: Optional list of dbt tag selectors (run only). When
+                provided takes precedence over ``select`` in AssetFactory.
+            full_refresh: Run with ``--full-refresh`` (run only).
+        """
+        if kind not in ("run", "test"):
+            raise ValueError("kind must be 'run' or 'test'")
+        if profile not in ("default", "lake", "warehouse"):
+            raise ValueError("profile must be one of: default, lake, warehouse")
+
+        # Pick TaskType
+        if kind == "test":
+            task_type = TaskType.DBT_TEST
+            type_tag = "dbt_test"
+        elif profile == "lake":
+            task_type = TaskType.DBT_RUN_LAKE
+            type_tag = "dbt_run"
+        elif profile == "warehouse":
+            task_type = TaskType.DBT_RUN_WAREHOUSE
+            type_tag = "dbt_run"
+        else:
+            task_type = TaskType.DBT_RUN
+            type_tag = "dbt_run"
+
+        # Default job name
+        if not name:
+            name = f"dbt_{kind}_{profile}"
+
+        # Check duplicate
+        existing = DagConfig.query.filter(
+            DagConfig.tenant_id == self.tenant_id,
+            DagConfig.dag_id == name,
+            DagConfig.status != DagStatus.ARCHIVED,
+        ).first()
+        if existing:
+            raise ValueError(
+                f"A job with the name '{name}' already exists. "
+                f"Please choose a different name or edit the existing job."
+            )
+
+        # Schedule
+        schedule_type = ScheduleType.MANUAL
+        schedule_cron = None
+        schedule_preset = None
+        if schedule:
+            if schedule.startswith("@"):
+                schedule_type = ScheduleType.PRESET
+                schedule_preset = schedule
+            else:
+                schedule_type = ScheduleType.CRON
+                schedule_cron = schedule
+
+        dag_config = DagConfig(
+            tenant_id=self.tenant_id,
+            dag_id=name,
+            description=description or f"dbt {kind} job (profile={profile})",
+            schedule_type=schedule_type,
+            schedule_cron=schedule_cron,
+            schedule_preset=schedule_preset,
+            status=DagStatus.ACTIVE,
+            default_retries=retries,
+            default_retry_delay_minutes=retry_delay_minutes,
+            tags=["dbt", type_tag, f"profile:{profile}"],
+            created_by=created_by or "system",
+        )
+
+        # Build task config
+        task_cfg: Dict[str, Any] = {}
+        if select:
+            # For tests AssetFactory reads `select`; for run it reads `models`
+            if kind == "test":
+                task_cfg["select"] = select
+            else:
+                task_cfg["models"] = [select]
+        if tags and kind == "run":
+            task_cfg["tags"] = list(tags)
+        if kind == "run":
+            task_cfg["full_refresh"] = bool(full_refresh)
+
+        task = TaskConfig(
+            dag_config=dag_config,
+            task_id=f"{type_tag}_{profile}",
+            task_type=task_type,
+            config=task_cfg,
+            timeout_minutes=120,
+            retries=retries,
+            retry_delay_minutes=retry_delay_minutes,
+        )
+
+        db.session.add(dag_config)
+        db.session.add(task)
+        db.session.commit()
+
+        self._register_job_with_dagster(dag_config)
+
+        return self._dag_to_job_dict(dag_config)
+
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get job details by ID."""
         dag = DagConfig.query.filter(
@@ -399,6 +519,22 @@ class UnifiedJobService:
         
         if not dag:
             return None
+        
+        # Auto-promote DRAFT jobs to ACTIVE so Dagster picks them up.
+        # Without this, the LaunchRun mutation below would fail with
+        # "Could not find Pipeline" because definitions.py only registers
+        # DAGs whose status is ACTIVE or PAUSED.
+        if dag.status == DagStatus.DRAFT:
+            try:
+                dag.status = DagStatus.ACTIVE
+                db.session.commit()
+                logger.info(
+                    f"Promoted DAG {dag.dag_id} from DRAFT to ACTIVE before trigger"
+                )
+                self._register_job_with_dagster(dag)
+            except Exception as e:
+                logger.warning(f"Failed to promote DAG {dag.dag_id}: {e}")
+                db.session.rollback()
         
         # Call Dagster API to trigger the job
         try:
@@ -768,55 +904,36 @@ class UnifiedJobService:
         dag: DagConfig,
         include_tasks: bool = False,
     ) -> Dict[str, Any]:
-        """Convert DagConfig to job dictionary."""
+        """Convert DagConfig to job dictionary.
+
+        The ``type`` field reflects the job kind exposed to the frontend:
+
+        * ``"pipeline"`` — multi-task dlt pipeline-of-pipelines
+        * ``"dbt"``      — dbt run / test job
+        * ``"dlt"``      — single dlt pipeline job (default for everything else)
+        """
         result = dag.to_dict(include_tasks=include_tasks)
         result["job_name"] = self._get_dagster_job_name(dag)
         tags = dag.tags or []
-        result["type"] = "pipeline" if "pipeline" in tags else "spark"
+        if "pipeline" in tags:
+            result["type"] = "pipeline"
+        elif "dbt" in tags:
+            result["type"] = "dbt"
+        else:
+            result["type"] = "dlt"
         # Ensure tags is always a list in the response
         if result.get("tags") is None:
             result["tags"] = []
         return result
-    
+
     def _get_dagster_job_name(self, dag: DagConfig) -> str:
+        """Return the Dagster job name registered for a DagConfig.
+
+        Must match the convention used by :class:`ScheduleFactory` /
+        :class:`AssetFactory` (``f"{dag.full_dag_id}_job"``). The legacy
+        Spark-flavoured naming has been removed.
         """
-        Get the Dagster job name for a DagConfig.
-        
-        Must match the naming convention in DagsterJobBuilder.build_job_for_pyspark_app:
-          safe_name = _make_safe_name(app_config.app_name)
-          job_name  = f"spark_job_{safe_tenant}_{safe_name}"
-        
-        Since create_job stores dag_id = f"spark_{app_name}" we strip the
-        'spark_' prefix.  For pipeline jobs (dag_id = "pipeline_...") we strip
-        'pipeline_'.  Falls back to using dag_id as-is for unknown patterns.
-        
-        If the DagConfig has a task with a pyspark_app_id we try loading the app
-        name directly — this is the most reliable path.
-        """
-        import re
-        safe_tenant = str(dag.tenant_id).replace('-', '_')
-        
-        # Try to resolve app name from the PySpark app itself (most reliable)
-        try:
-            tasks = list(dag.tasks) if dag.tasks else []
-            for task in tasks:
-                app_id = (task.config or {}).get("pyspark_app_id")
-                if app_id:
-                    app = PySparkApp.query.get(app_id)
-                    if app:
-                        safe_name = re.sub(r'[^a-z0-9_]', '_', app.name.lower())[:50]
-                        return f"spark_job_{safe_tenant}_{safe_name}"
-        except Exception:
-            pass  # Fallback to dag_id-based derivation
-        
-        # Fallback: derive from dag_id by stripping the prefix that create_job added
-        raw_name = dag.dag_id.replace('-', '_')
-        if raw_name.startswith('spark_'):
-            raw_name = raw_name[len('spark_'):]
-        elif raw_name.startswith('pipeline_'):
-            raw_name = raw_name[len('pipeline_'):]
-        
-        return f"spark_job_{safe_tenant}_{raw_name}"
+        return f"{dag.full_dag_id}_job"
     
     @staticmethod
     def _extract_graphql_error(result: dict, fallback: str = "Unknown error") -> str:

@@ -1,7 +1,8 @@
 packages:
   - package: dbt-labs/dbt_utils
     version: 1.1.1
-  - package: ClickHouse/dbt-clickhouse
-    version: 1.6.0
   - package: calogica/dbt_expectations
     version: 0.10.1
+# NOTE: dbt-clickhouse is the Python adapter (installed via pip in
+# backend/requirements.txt), NOT a dbt-hub package. Listing it here causes
+# `dbt deps` to fail with a "package not found" error from dbt Hub.

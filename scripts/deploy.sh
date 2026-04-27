@@ -17,7 +17,6 @@
 #   --build          Force rebuild containers
 #   --clean          Remove volumes and start fresh
 #   --skip-tests     Skip running tests before deployment
-#   --no-spark       Skip Spark cluster (dev/test only)
 #   --no-ollama      Skip Ollama LLM service
 #   --no-airflow     Skip Airflow (use Dagster only)
 #   --monitoring     Include monitoring stack (Prometheus, Grafana, Loki)
@@ -48,7 +47,6 @@ ENVIRONMENT="dev"
 BUILD=false
 CLEAN=false
 SKIP_TESTS=false
-NO_SPARK=false
 NO_OLLAMA=false
 NO_AIRFLOW=false
 MONITORING=false
@@ -111,7 +109,6 @@ show_help() {
     echo "  --build          Force rebuild containers"
     echo "  --clean          Remove volumes and start fresh"
     echo "  --skip-tests     Skip running tests before deployment"
-    echo "  --no-spark       Skip Spark cluster (dev/test only)"
     echo "  --no-ollama      Skip Ollama LLM service"
     echo "  --no-airflow     Skip Airflow (use Dagster only)"
     echo "  --monitoring     Include monitoring stack (Prometheus, Grafana, Loki)"
@@ -229,9 +226,6 @@ deploy_development() {
     
     # Build excluded services list
     local scale_opts=""
-    if [ "$NO_SPARK" = true ]; then
-        scale_opts="$scale_opts --scale spark-master=0 --scale spark-worker-1=0 --scale spark-worker-2=0"
-    fi
     if [ "$NO_OLLAMA" = true ]; then
         scale_opts="$scale_opts --scale ollama=0"
     fi
@@ -258,11 +252,6 @@ deploy_development() {
         fi
         
         # Start optional services
-        if [ "$NO_SPARK" = false ]; then
-            print_info "Starting Spark cluster..."
-            $compose_cmd up -d spark-master spark-worker-1 spark-worker-2
-        fi
-        
         if [ "$NO_OLLAMA" = false ]; then
             print_info "Starting Ollama..."
             $compose_cmd up -d ollama
@@ -290,9 +279,6 @@ deploy_development() {
     print_info "  Dagster UI:   http://localhost:3000"
     if [ "$NO_AIRFLOW" = false ]; then
         print_info "  Airflow UI:   http://localhost:8080 (airflow/airflow)"
-    fi
-    if [ "$NO_SPARK" = false ]; then
-        print_info "  Spark UI:     http://localhost:8081"
     fi
     print_info "  ClickHouse:   http://localhost:8123"
     if [ "$NO_OLLAMA" = false ]; then
@@ -512,9 +498,6 @@ parse_args() {
                 ;;
             --skip-tests)
                 SKIP_TESTS=true
-                ;;
-            --no-spark)
-                NO_SPARK=true
                 ;;
             --no-ollama)
                 NO_OLLAMA=true

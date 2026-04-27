@@ -17,7 +17,8 @@ REM Options:
 REM   --build          Force rebuild containers
 REM   --clean          Remove volumes and start fresh
 REM   --skip-tests     Skip running tests before deployment
-REM   --no-spark       Skip Spark cluster (dev/test only)
+REM   --no-spark       Skip Spark cluster (dev/test only) [REMOVED — Spark no longer supported]
+REM
 REM   --no-ollama      Skip Ollama LLM service
 REM   --no-airflow     Skip Airflow orchestration (use Dagster only)
 REM   --monitoring     Include monitoring stack (Prometheus, Grafana, Loki)
@@ -37,7 +38,7 @@ set "ENVIRONMENT=dev"
 set "BUILD=false"
 set "CLEAN=false"
 set "SKIP_TESTS=false"
-set "NO_SPARK=false"
+set "NO_SPARK=true"  REM Spark removed; flag retained for backward compat (no-op)
 set "NO_OLLAMA=false"
 set "NO_AIRFLOW=false"
 set "MONITORING=false"
@@ -57,7 +58,7 @@ if /i "%~1"=="production" set "ENVIRONMENT=production"
 if /i "%~1"=="--build" set "BUILD=true"
 if /i "%~1"=="--clean" set "CLEAN=true"
 if /i "%~1"=="--skip-tests" set "SKIP_TESTS=true"
-if /i "%~1"=="--no-spark" set "NO_SPARK=true"
+if /i "%~1"=="--no-spark" set "NO_SPARK=true"  REM no-op (Spark removed)
 if /i "%~1"=="--no-ollama" set "NO_OLLAMA=true"
 if /i "%~1"=="--no-airflow" set "NO_AIRFLOW=true"
 if /i "%~1"=="--monitoring" set "MONITORING=true"
@@ -181,11 +182,6 @@ if "%NO_AIRFLOW%"=="false" (
     echo [INFO] Skipping Airflow (--no-airflow flag set)
 )
 
-if "%NO_SPARK%"=="false" (
-    echo [INFO] Starting Spark cluster...
-    %COMPOSE_CMD% up -d spark-master spark-worker-1 spark-worker-2
-)
-
 if "%NO_OLLAMA%"=="false" (
     echo [INFO] Starting Ollama...
     %COMPOSE_CMD% up -d ollama
@@ -210,7 +206,6 @@ echo   Backend API:  http://localhost:5000
 echo   API Docs:     http://localhost:5000/api/v1/docs
 echo   Dagster UI:   http://localhost:3000
 echo   Airflow UI:   http://localhost:8080 (airflow/airflow)
-echo   Spark UI:     http://localhost:8081
 echo   ClickHouse:   http://localhost:8123
 echo   Ollama:       http://localhost:11434
 echo.
@@ -409,7 +404,7 @@ echo Options:
 echo   --build          Force rebuild containers
 echo   --clean          Remove volumes and start fresh
 echo   --skip-tests     Skip running tests before deployment
-echo   --no-spark       Skip Spark cluster (dev/test only)
+echo   --no-spark       (deprecated, no-op) Spark cluster has been removed
 echo   --no-ollama      Skip Ollama LLM service
 echo   --no-airflow     Skip Airflow (use Dagster only)
 echo   --monitoring     Include monitoring stack (Prometheus, Grafana, Loki)

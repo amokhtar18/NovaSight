@@ -65,7 +65,7 @@ class ScheduleFactory:
             return None
         
         # Create job for this pipeline's assets
-        group_name = f"tenant_{self.tenant_id}_{dag_config.dag_id}"
+        group_name = f"tenant_{dag_config.full_dag_id}"
         job_name = f"{dag_config.full_dag_id}_job"
         
         job = define_asset_job(
@@ -116,7 +116,7 @@ class ScheduleFactory:
 
     def build_job_from_dag_config(self, dag_config):
         """Build a job definition for manual triggering."""
-        group_name = f"tenant_{self.tenant_id}_{dag_config.dag_id}"
+        group_name = f"tenant_{dag_config.full_dag_id}"
         
         return define_asset_job(
             name=f"{dag_config.full_dag_id}_job",

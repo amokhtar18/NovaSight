@@ -1,0 +1,36 @@
+# =============================================================================
+# NovaSight Iceberg SQL Catalog
+# =============================================================================
+# Postgres-backed Iceberg catalog. Stores table metadata (schemas, snapshots,
+# partition specs); the actual data files live in the S3 buckets defined in
+# `s3.env.example`.
+#
+# Consumed by:
+#   - dlt pipelines (when registering Iceberg tables on write)
+#   - dbt-duckdb lake target (via DuckDB iceberg extension)
+#   - Backend ingestion services
+# =============================================================================
+
+catalog:
+  name: ${ICEBERG_CATALOG_NAME:-novasight}
+  type: sql
+  uri: ${ICEBERG_CATALOG_URI}
+  warehouse: ${ICEBERG_WAREHOUSE:-s3://novasight/}
+
+  # File IO points at the same S3 endpoint used by dlt and dbt.
+  io:
+    impl: pyiceberg.io.pyarrow.PyArrowFileIO
+    s3.endpoint: ${S3_ENDPOINT_URL}
+    s3.region: ${AWS_REGION:-us-east-1}
+    s3.access-key-id: ${AWS_ACCESS_KEY_ID}
+    s3.secret-access-key: ${AWS_SECRET_ACCESS_KEY}
+    s3.path-style-access: ${S3_URL_STYLE:-path}
+    s3.ssl-enabled: ${S3_USE_SSL:-false}
+
+# Per-tenant namespaces are created on demand as `tenant_{slug}` and contain
+# schemas (raw, staging, marts) which dbt then reads/transforms.
+namespaces:
+  pattern: "tenant_{slug}"
+  default_schemas:
+    - raw      # dlt landing zone
+    - staging  # dbt staging models (lake target)

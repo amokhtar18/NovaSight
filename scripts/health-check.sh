@@ -54,7 +54,7 @@ SERVICES=(
     ["frontend"]="http://localhost:5173"
     ["dagster"]="http://localhost:3000/server_info"
     ["airflow-api-server"]="http://localhost:8080/api/v2/version"
-    ["spark-master"]="http://localhost:8081"
+    ["minio"]="http://localhost:9001/minio/health/live"
     ["ollama"]="http://localhost:11434/api/tags"
 )
 

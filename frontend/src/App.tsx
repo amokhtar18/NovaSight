@@ -19,9 +19,6 @@ import {
   ComingSoonPage,
 } from '@/pages/marketing'
 import { DashboardPage } from '@/pages/dashboard/DashboardPage'
-import { DagsListPage } from '@/pages/orchestration/DagsListPage'
-import { DagBuilderPage } from '@/pages/orchestration/DagBuilderPage'
-import { DagMonitorPage } from '@/pages/orchestration/DagMonitorPage'
 import { DagsterDashboardPage } from '@/pages/orchestration/DagsterDashboardPage'
 import { SchedulingPage } from '@/pages/orchestration/SchedulingPage'
 import { JobBuilderPage } from '@/pages/orchestration/JobBuilderPage'
@@ -105,10 +102,8 @@ function App() {
             
             {/* Orchestration - Redirect to Scheduling */}
             <Route path="orchestration" element={<Navigate to="/app/jobs" replace />} />
-            <Route path="dags" element={<DagsListPage />} />
-            <Route path="dags/new" element={<DagBuilderPage />} />
-            <Route path="dags/:dagId/edit" element={<DagBuilderPage />} />
-            <Route path="dags/:dagId/monitor" element={<DagMonitorPage />} />
+            <Route path="dags" element={<Navigate to="/app/jobs" replace />} />
+            <Route path="dags/*" element={<Navigate to="/app/jobs" replace />} />
             
             {/* Scheduling - Unified Job & Run Management */}
             <Route path="jobs" element={<SchedulingPage />} />
@@ -182,7 +177,7 @@ function App() {
           <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />
           <Route path="/connections" element={<Navigate to="/app/datasources" replace />} />
           <Route path="/datasources" element={<Navigate to="/app/datasources" replace />} />
-          <Route path="/dags" element={<Navigate to="/app/dags" replace />} />
+          <Route path="/dags" element={<Navigate to="/app/jobs" replace />} />
           <Route path="/jobs" element={<Navigate to="/app/jobs" replace />} />
           <Route path="/pyspark" element={<Navigate to="/app/pipelines" replace />} />
           <Route path="/semantic" element={<Navigate to="/app/semantic" replace />} />

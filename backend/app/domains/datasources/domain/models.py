@@ -35,34 +35,24 @@ class SourceCategory(enum.Enum):
 
 
 class DatabaseType(enum.Enum):
-    """Supported database types."""
+    """Supported database types (SQL connections only).
+
+    File ingestion is handled by the dlt pipeline builder via
+    ``source_kind = 'file'`` and is not represented as a connection type.
+    """
     POSTGRESQL = "postgresql"
     ORACLE = "oracle"
     SQLSERVER = "sqlserver"
     MYSQL = "mysql"
     CLICKHOUSE = "clickhouse"
-    FLATFILE = "flatfile"
-    EXCEL = "excel"
-    SQLITE = "sqlite"
 
     @property
     def category(self) -> SourceCategory:
-        """Return the source category for this type."""
-        if self in _FILE_TYPES:
-            return SourceCategory.FILE
         return SourceCategory.DATABASE
 
     @property
     def is_file_based(self) -> bool:
-        return self.category == SourceCategory.FILE
-
-
-# Set of file-based database types
-_FILE_TYPES = frozenset({
-    DatabaseType.FLATFILE,
-    DatabaseType.EXCEL,
-    DatabaseType.SQLITE,
-})
+        return False
 
 
 class ConnectionStatus(enum.Enum):
@@ -224,11 +214,6 @@ class DataConnection(TenantMixin, TimestampMixin, db.Model):
     def __repr__(self):
         return f"<DataConnection {self.name}>"
 
-    @property
-    def source_category(self) -> str:
-        """Return 'database' or 'file'."""
-        return self.db_type.category.value
-
     def to_dict(self, mask_password: bool = True) -> dict:
         """Convert connection to dictionary."""
         result = {
@@ -237,7 +222,6 @@ class DataConnection(TenantMixin, TimestampMixin, db.Model):
             "name": self.name,
             "description": self.description,
             "db_type": self.db_type.value,
-            "source_category": self.source_category,
             "host": self.host,
             "port": self.port,
             "database": self.database,
@@ -253,25 +237,10 @@ class DataConnection(TenantMixin, TimestampMixin, db.Model):
         }
         if mask_password:
             result["password"] = "********"
-        # Include file metadata for file-based sources
-        if self.db_type.is_file_based:
-            result["file_info"] = {
-                "file_name": self.extra_params.get("file_name"),
-                "file_size": self.extra_params.get("file_size"),
-                "file_format": self.extra_params.get("file_format"),
-                "mime_type": self.extra_params.get("mime_type"),
-            }
         return result
 
     def get_connection_string(self, password: str = "") -> str:
         """Generate SQLAlchemy connection string."""
-        # File-based sources don't use traditional connection strings
-        if self.db_type == DatabaseType.SQLITE:
-            file_ref = self.extra_params.get("file_ref", "")
-            return f"sqlite:///{file_ref}"
-        if self.db_type.is_file_based:
-            return ""  # Flat files and Excel don't use SQLAlchemy
-
         dialect_map = {
             DatabaseType.POSTGRESQL: "postgresql+psycopg2",
             DatabaseType.ORACLE: "oracle+cx_oracle",

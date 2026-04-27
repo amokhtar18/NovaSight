@@ -67,6 +67,17 @@ export const visualModelApi = {
     return data
   },
 
+  /** Preview generated SQL/YAML for an in-progress (unsaved) model. */
+  previewCodeFromPayload: async (
+    payload: VisualModelCreatePayload,
+  ): Promise<GeneratedCodePreview> => {
+    const { data } = await apiClient.post(
+      `${BASE}/visual-models/preview`,
+      payload,
+    )
+    return data
+  },
+
   /** Save canvas position only (no regeneration). */
   saveCanvasState: async (modelId: string, payload: CanvasStatePayload): Promise<void> => {
     await apiClient.put(`${BASE}/visual-models/${modelId}/canvas`, payload)
@@ -103,6 +114,36 @@ export const warehouseApi = {
     const { data } = await apiClient.get(`${BASE}/warehouse/columns`, {
       params: { schema, table },
     })
+    return data
+  },
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Iceberg Lake Introspection
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * One Iceberg table on the tenant's S3 lake. Used as a staging-model
+ * source. dbt Studio renders this as ``iceberg('<s3_uri>')`` in the
+ * generated ClickHouse SQL.
+ */
+export interface LakeTable {
+  pipeline_id: string
+  pipeline_name: string
+  namespace: string
+  table: string
+  s3_uri: string | null
+  endpoint_url: string | null
+  status: string
+  last_run_status: string | null
+  last_run_at: string | null
+  columns: Array<{ name: string; type?: string; description?: string }>
+}
+
+export const lakeApi = {
+  /** List Iceberg tables available to the tenant. */
+  listTables: async (): Promise<LakeTable[]> => {
+    const { data } = await apiClient.get(`${BASE}/lake/tables`)
     return data
   },
 }

@@ -76,16 +76,10 @@ from app.domains.datasources.infrastructure.connectors.postgresql import (
 )
 from app.domains.datasources.infrastructure.connectors.mysql import MySQLConnector
 from app.domains.datasources.infrastructure.connectors.oracle import OracleConnector
-from app.domains.datasources.infrastructure.connectors.flatfile import FlatFileConnector
-from app.domains.datasources.infrastructure.connectors.excel import ExcelConnector
-from app.domains.datasources.infrastructure.connectors.sqlite import SQLiteConnector
 
 ConnectorRegistry.register(PostgreSQLConnector)
 ConnectorRegistry.register(MySQLConnector)
 ConnectorRegistry.register(OracleConnector)
-ConnectorRegistry.register(FlatFileConnector)
-ConnectorRegistry.register(ExcelConnector)
-ConnectorRegistry.register(SQLiteConnector)
 
 logger.info(
     f"Registered {len(ConnectorRegistry.list_connectors())} connectors: "

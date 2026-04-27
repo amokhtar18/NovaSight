@@ -3,12 +3,15 @@ NovaSight Orchestration Domain — Asset Factory
 ================================================
 
 Dynamically generates Dagster assets from pipeline configurations.
-Replaces DAG file generation with in-memory asset definitions.
+
+Post Spark→dlt migration the orchestrator schedules **only dlt and dbt
+jobs**. Any other ``TaskType`` is rejected by the factory and surfaces a
+warning rather than producing a broken asset.
 
 Canonical location: ``app.domains.orchestration.infrastructure.asset_factory``
 """
 
-from typing import Dict, Any, List, Optional, Callable
+from typing import Callable, Dict, List
 import logging
 
 from dagster import (
@@ -23,12 +26,25 @@ from dagster import (
 logger = logging.getLogger(__name__)
 
 
+# Task types the orchestrator is allowed to schedule.
+# Keep in sync with ``TaskType`` enum in
+# ``app.domains.orchestration.domain.models``.
+ALLOWED_TASK_TYPES = frozenset({
+    "dlt_run",
+    "dbt_run",
+    "dbt_test",
+    "dbt_run_lake",
+    "dbt_run_warehouse",
+})
+
+
 class AssetFactory:
     """
     Dynamically builds Dagster assets from DagConfig models.
-    
-    This replaces the Jinja2 template-based DAG generation with
-    in-memory asset definitions that Dagster loads at runtime.
+
+    Only ``dlt_*`` and ``dbt_*`` task types are supported. This is enforced
+    at build time so legacy task definitions (spark/sql/python/bash/email)
+    cannot accidentally be deployed.
     """
 
     def __init__(self, tenant_id: str):
@@ -37,51 +53,70 @@ class AssetFactory:
     def build_assets_from_dag_config(self, dag_config) -> List[AssetsDefinition]:
         """
         Build Dagster assets from a DagConfig model.
-        
+
         Each TaskConfig becomes an asset with proper dependencies.
+        Tasks whose ``task_type`` is not in ``ALLOWED_TASK_TYPES`` are
+        skipped and logged as warnings.
         """
         from app.domains.orchestration.domain.models import TaskType
-        
-        # Task type to asset builder mapping
+
         builders: Dict[str, Callable] = {
-            TaskType.SPARK_SUBMIT.value if hasattr(TaskType.SPARK_SUBMIT, 'value') else str(TaskType.SPARK_SUBMIT): self._build_spark_asset,
-            TaskType.DBT_RUN.value if hasattr(TaskType.DBT_RUN, 'value') else str(TaskType.DBT_RUN): self._build_dbt_asset,
-            TaskType.DBT_TEST.value if hasattr(TaskType.DBT_TEST, 'value') else str(TaskType.DBT_TEST): self._build_dbt_test_asset,
-            TaskType.SQL_QUERY.value if hasattr(TaskType.SQL_QUERY, 'value') else str(TaskType.SQL_QUERY): self._build_sql_asset,
-            TaskType.PYTHON_OPERATOR.value if hasattr(TaskType.PYTHON_OPERATOR, 'value') else str(TaskType.PYTHON_OPERATOR): self._build_python_asset,
-            TaskType.BASH_OPERATOR.value if hasattr(TaskType.BASH_OPERATOR, 'value') else str(TaskType.BASH_OPERATOR): self._build_bash_asset,
-            TaskType.EMAIL.value if hasattr(TaskType.EMAIL, 'value') else str(TaskType.EMAIL): self._build_email_asset,
+            TaskType.DLT_RUN.value: self._build_dlt_asset,
+            TaskType.DBT_RUN.value: self._build_dbt_asset,
+            TaskType.DBT_TEST.value: self._build_dbt_test_asset,
+            TaskType.DBT_RUN_LAKE.value: self._build_dbt_lake_asset,
+            TaskType.DBT_RUN_WAREHOUSE.value: self._build_dbt_warehouse_asset,
         }
-        
-        assets = []
-        group_name = f"tenant_{self.tenant_id}_{dag_config.dag_id}"
-        
+
+        assets: List[AssetsDefinition] = []
+        # Group name must satisfy Dagster's regex ^[A-Za-z0-9_]+$, so we
+        # use the already-sanitized ``full_dag_id`` instead of mixing in
+        # the tenant UUID directly (which contains hyphens).
+        group_name = f"tenant_{dag_config.full_dag_id}"
+
         for task in dag_config.tasks:
-            task_type_key = task.task_type.value if hasattr(task.task_type, 'value') else str(task.task_type)
+            task_type_key = (
+                task.task_type.value
+                if hasattr(task.task_type, "value")
+                else str(task.task_type)
+            )
+
+            if task_type_key not in ALLOWED_TASK_TYPES:
+                logger.warning(
+                    "Skipping task %s: task_type=%s is not allowed. "
+                    "Orchestrator schedules only dlt and dbt jobs.",
+                    task.task_id,
+                    task_type_key,
+                )
+                continue
+
             builder = builders.get(task_type_key)
-            if builder:
-                asset_def = builder(task, dag_config, group_name)
-                if asset_def:
-                    assets.append(asset_def)
-            else:
-                logger.warning(f"No builder for task type: {task.task_type}")
-        
+            if builder is None:
+                logger.warning("No builder registered for task type: %s", task_type_key)
+                continue
+
+            asset_def = builder(task, dag_config, group_name)
+            if asset_def:
+                assets.append(asset_def)
+
         return assets
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     def _get_asset_deps(self, task) -> List[AssetKey]:
         """Convert task dependencies to AssetKeys."""
         return [AssetKey(dep) for dep in (task.depends_on or [])]
 
-    def _build_spark_asset(
-        self,
-        task,
-        dag_config,
-        group_name: str,
-    ) -> AssetsDefinition:
-        """Build a Spark submit asset."""
+    # ------------------------------------------------------------------
+    # dlt
+    # ------------------------------------------------------------------
+
+    def _build_dlt_asset(self, task, dag_config, group_name: str) -> AssetsDefinition:
+        """Build a dlt pipeline run asset."""
         config = task.config or {}
-        spark_app = config.get("spark_app_path", "")
-        spark_args = config.get("spark_args", {})
+        pipeline_id = config.get("pipeline_id")
         task_id = task.task_id
         tenant_id = self.tenant_id
         dag_id = dag_config.dag_id
@@ -90,43 +125,72 @@ class AssetFactory:
         @asset(
             name=task_id,
             group_name=group_name,
-            compute_kind="spark",
+            compute_kind="dlt",
             deps=deps,
             metadata={
                 "tenant_id": tenant_id,
                 "dag_id": dag_id,
-                "spark_app": spark_app,
+                "pipeline_id": str(pipeline_id) if pipeline_id else "",
             },
             op_tags={
-                "dagster/concurrency_key": "spark_jobs",
+                "dagster/concurrency_key": "dlt_runs",
                 "tenant_id": tenant_id,
             },
         )
-        def _spark_asset(context: AssetExecutionContext) -> MaterializeResult:
-            context.log.info(f"Executing Spark job: {spark_app}")
-            
-            # Get spark resource and execute
-            spark = context.resources.spark
-            session = spark.get_session()
-            
-            context.log.info(f"Spark args: {spark_args}")
-            
+        def _dlt_asset(context: AssetExecutionContext) -> MaterializeResult:
+            from app.domains.ingestion.application.dlt_pipeline_service import (
+                DltPipelineService,
+            )
+
+            context.log.info("Running dlt pipeline %s", pipeline_id)
+
+            if not pipeline_id:
+                raise ValueError(
+                    f"Task {task_id} has no pipeline_id configured"
+                )
+
+            # Execute via DltPipelineService inside a Flask app context
+            # so SQLAlchemy session lookup works. Dagster's run worker
+            # is a separate process with no ambient app context.
+            from flask import has_app_context, current_app
+
+            service = DltPipelineService()
+            if has_app_context():
+                result = service.run_now(pipeline_id, tenant_id)
+            else:
+                from app import create_app
+                app = create_app()
+                with app.app_context():
+                    result = service.run_now(pipeline_id, tenant_id)
+
             return MaterializeResult(
                 metadata={
-                    "spark_app": MetadataValue.text(spark_app),
-                    "status": MetadataValue.text("completed"),
+                    "pipeline_id": MetadataValue.text(str(pipeline_id)),
+                    "run_status": MetadataValue.text(
+                        str(result.get("status", "unknown"))
+                    ),
                 }
             )
-        
-        return _spark_asset
 
-    def _build_dbt_asset(
-        self,
-        task,
-        dag_config,
-        group_name: str,
-    ) -> AssetsDefinition:
-        """Build a dbt run asset."""
+        return _dlt_asset
+
+    # ------------------------------------------------------------------
+    # dbt
+    # ------------------------------------------------------------------
+
+    def _build_dbt_asset(self, task, dag_config, group_name: str) -> AssetsDefinition:
+        """Build a dbt run asset (default profile)."""
+        return self._build_dbt_run(task, dag_config, group_name, profile=None)
+
+    def _build_dbt_lake_asset(self, task, dag_config, group_name: str) -> AssetsDefinition:
+        """Build a dbt run asset against the DuckDB / lake profile."""
+        return self._build_dbt_run(task, dag_config, group_name, profile="lake")
+
+    def _build_dbt_warehouse_asset(self, task, dag_config, group_name: str) -> AssetsDefinition:
+        """Build a dbt run asset against the ClickHouse / warehouse profile."""
+        return self._build_dbt_run(task, dag_config, group_name, profile="warehouse")
+
+    def _build_dbt_run(self, task, dag_config, group_name: str, profile):
         config = task.config or {}
         models = config.get("models", [])
         tags = config.get("tags", [])
@@ -135,10 +199,13 @@ class AssetFactory:
         tenant_id = self.tenant_id
         dag_id = dag_config.dag_id
         deps = self._get_asset_deps(task)
-        
-        select_arg = " ".join(models) if models else "*"
+
         if tags:
             select_arg = " ".join([f"tag:{t}" for t in tags])
+        elif models:
+            select_arg = " ".join(models)
+        else:
+            select_arg = "*"
 
         @asset(
             name=task_id,
@@ -149,6 +216,7 @@ class AssetFactory:
                 "tenant_id": tenant_id,
                 "dag_id": dag_id,
                 "dbt_select": select_arg,
+                "dbt_profile": profile or "default",
             },
             op_tags={
                 "dagster/concurrency_key": "dbt_runs",
@@ -156,31 +224,28 @@ class AssetFactory:
             },
         )
         def _dbt_asset(context: AssetExecutionContext) -> MaterializeResult:
-            context.log.info(f"Running dbt models: {select_arg}")
-            
+            context.log.info(
+                "Running dbt models: %s (profile=%s)", select_arg, profile or "default"
+            )
             dbt = context.resources.dbt
-            
             cmd = ["run", "--select", select_arg]
+            if profile:
+                cmd.extend(["--target", profile])
             if full_refresh:
                 cmd.append("--full-refresh")
-            
-            result = dbt.cli(cmd, context=context)
-            
+            dbt.cli(cmd, context=context)
+
             return MaterializeResult(
                 metadata={
                     "dbt_select": MetadataValue.text(select_arg),
                     "full_refresh": MetadataValue.bool(full_refresh),
+                    "dbt_profile": MetadataValue.text(profile or "default"),
                 }
             )
-        
+
         return _dbt_asset
 
-    def _build_dbt_test_asset(
-        self,
-        task,
-        dag_config,
-        group_name: str,
-    ) -> AssetsDefinition:
+    def _build_dbt_test_asset(self, task, dag_config, group_name: str) -> AssetsDefinition:
         """Build a dbt test asset."""
         config = task.config or {}
         select_arg = config.get("select", "*")
@@ -201,176 +266,9 @@ class AssetFactory:
             op_tags={"dagster/concurrency_key": "dbt_runs"},
         )
         def _dbt_test_asset(context: AssetExecutionContext) -> MaterializeResult:
-            context.log.info(f"Running dbt tests: {select_arg}")
-            
+            context.log.info("Running dbt tests: %s", select_arg)
             dbt = context.resources.dbt
-            result = dbt.cli(["test", "--select", select_arg], context=context)
-            
-            return MaterializeResult(
-                metadata={"tests_passed": MetadataValue.bool(True)}
-            )
-        
+            dbt.cli(["test", "--select", select_arg], context=context)
+            return MaterializeResult(metadata={"tests_passed": MetadataValue.bool(True)})
+
         return _dbt_test_asset
-
-    def _build_sql_asset(
-        self,
-        task,
-        dag_config,
-        group_name: str,
-    ) -> AssetsDefinition:
-        """Build a SQL query asset."""
-        config = task.config or {}
-        query = config.get("query", "")
-        database = config.get("database", "clickhouse")
-        task_id = task.task_id
-        tenant_id = self.tenant_id
-        dag_id = dag_config.dag_id
-        deps = self._get_asset_deps(task)
-
-        @asset(
-            name=task_id,
-            group_name=group_name,
-            compute_kind="sql",
-            deps=deps,
-            metadata={
-                "tenant_id": tenant_id,
-                "dag_id": dag_id,
-                "database": database,
-            },
-        )
-        def _sql_asset(context: AssetExecutionContext) -> MaterializeResult:
-            context.log.info(f"Executing SQL on {database}")
-            
-            if database == "clickhouse":
-                db = context.resources.clickhouse
-            else:
-                db = context.resources.postgres
-            
-            result = db.execute(query)
-            
-            return MaterializeResult(
-                metadata={"rows_affected": MetadataValue.int(getattr(result, 'rowcount', 0))}
-            )
-        
-        return _sql_asset
-
-    def _build_python_asset(
-        self,
-        task,
-        dag_config,
-        group_name: str,
-    ) -> AssetsDefinition:
-        """Build a Python operator asset."""
-        config = task.config or {}
-        callable_path = config.get("python_callable", "")
-        op_kwargs = config.get("op_kwargs", {})
-        task_id = task.task_id
-        tenant_id = self.tenant_id
-        dag_id = dag_config.dag_id
-        deps = self._get_asset_deps(task)
-
-        @asset(
-            name=task_id,
-            group_name=group_name,
-            compute_kind="python",
-            deps=deps,
-            metadata={
-                "tenant_id": tenant_id,
-                "dag_id": dag_id,
-            },
-        )
-        def _python_asset(context: AssetExecutionContext) -> MaterializeResult:
-            context.log.info(f"Executing Python callable: {callable_path}")
-            
-            # Dynamically import and execute callable
-            module_path, func_name = callable_path.rsplit(".", 1)
-            import importlib
-            module = importlib.import_module(module_path)
-            func = getattr(module, func_name)
-            
-            result = func(**op_kwargs)
-            
-            return MaterializeResult(
-                metadata={"callable": MetadataValue.text(callable_path)}
-            )
-        
-        return _python_asset
-
-    def _build_bash_asset(
-        self,
-        task,
-        dag_config,
-        group_name: str,
-    ) -> AssetsDefinition:
-        """Build a Bash operator asset."""
-        config = task.config or {}
-        bash_command = config.get("bash_command", "")
-        task_id = task.task_id
-        tenant_id = self.tenant_id
-        dag_id = dag_config.dag_id
-        deps = self._get_asset_deps(task)
-
-        @asset(
-            name=task_id,
-            group_name=group_name,
-            compute_kind="bash",
-            deps=deps,
-            metadata={
-                "tenant_id": tenant_id,
-                "dag_id": dag_id,
-            },
-        )
-        def _bash_asset(context: AssetExecutionContext) -> MaterializeResult:
-            import subprocess
-            
-            context.log.info(f"Executing bash: {bash_command[:50]}...")
-            
-            result = subprocess.run(
-                bash_command,
-                shell=True,
-                capture_output=True,
-                text=True,
-            )
-            
-            if result.returncode != 0:
-                raise Exception(f"Bash command failed: {result.stderr}")
-            
-            return MaterializeResult(
-                metadata={
-                    "return_code": MetadataValue.int(result.returncode),
-                    "stdout_preview": MetadataValue.text(result.stdout[:500] if result.stdout else ""),
-                }
-            )
-        
-        return _bash_asset
-
-    def _build_email_asset(
-        self,
-        task,
-        dag_config,
-        group_name: str,
-    ) -> AssetsDefinition:
-        """Build an email notification asset."""
-        config = task.config or {}
-        task_id = task.task_id
-        deps = self._get_asset_deps(task)
-
-        @asset(
-            name=task_id,
-            group_name=group_name,
-            compute_kind="email",
-            deps=deps,
-        )
-        def _email_asset(context: AssetExecutionContext) -> MaterializeResult:
-            recipients = config.get("recipients", [])
-            subject = config.get("subject", "NovaSight Notification")
-            
-            context.log.info(f"Sending email to {recipients}")
-            
-            # Email sending logic would go here
-            
-            return MaterializeResult(
-                metadata={"recipients": MetadataValue.text(", ".join(recipients))}
-            )
-        
-        return _email_asset

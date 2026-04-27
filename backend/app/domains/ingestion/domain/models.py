@@ -18,9 +18,31 @@ import enum
 
 
 class SourceType(enum.Enum):
-    """Source type for dlt extraction."""
+    """Source type for dlt extraction (SQL connections)."""
     TABLE = "table"
     QUERY = "query"
+
+
+class DltSourceKind(enum.Enum):
+    """Source kind discriminator for dlt pipelines.
+
+    - SQL:  pipeline reads from a registered DataConnection (sql_database).
+    - FILE: pipeline reads an uploaded file from the tenant's S3 bucket
+            under the ``raw_uploads/`` prefix.
+    """
+    SQL = "sql"
+    FILE = "file"
+
+
+class FileFormat(enum.Enum):
+    """Supported file formats for FILE-kind dlt pipelines."""
+    CSV = "csv"
+    TSV = "tsv"
+    XLSX = "xlsx"
+    XLS = "xls"
+    PARQUET = "parquet"
+    JSON = "json"
+    JSONL = "jsonl"
 
 
 class WriteDisposition(enum.Enum):
@@ -74,13 +96,26 @@ class DltPipeline(db.Model):
         index=True
     )
     
-    # Source connection
+    # Source connection (NULL when source_kind == 'file')
     connection_id = db.Column(
-        UUID(as_uuid=True), 
-        ForeignKey("data_connections.id"), 
-        nullable=False,
+        UUID(as_uuid=True),
+        ForeignKey("data_connections.id", ondelete="CASCADE"),
+        nullable=True,
         index=True
     )
+
+    # Source kind discriminator: 'sql' (default) or 'file'
+    source_kind = db.Column(
+        String(16),
+        default=DltSourceKind.SQL.value,
+        nullable=False,
+        index=True,
+    )
+
+    # File-source fields (only used when source_kind == 'file')
+    file_format = db.Column(String(16), nullable=True)
+    file_object_key = db.Column(String(1024), nullable=True)
+    file_options = db.Column(JSONB, default=dict, nullable=False)
     
     # Identity
     name = db.Column(String(255), nullable=False)
@@ -164,7 +199,14 @@ class DltPipeline(db.Model):
     
     # Relationships
     tenant = relationship("Tenant", backref="dlt_pipelines")
-    connection = relationship("DataConnection", backref="dlt_pipelines")
+    connection = relationship(
+        "DataConnection",
+        backref=db.backref(
+            "dlt_pipelines",
+            cascade="all, delete-orphan",
+            passive_deletes=True,
+        ),
+    )
     creator = relationship("User", foreign_keys=[created_by])
     
     def __repr__(self):
@@ -183,14 +225,18 @@ class DltPipeline(db.Model):
         result = {
             "id": str(self.id),
             "tenant_id": str(self.tenant_id),
-            "connection_id": str(self.connection_id),
+            "connection_id": str(self.connection_id) if self.connection_id else None,
             "name": self.name,
             "description": self.description,
             "status": self.status.value if self.status else None,
+            "source_kind": self.source_kind or DltSourceKind.SQL.value,
             "source_type": self.source_type.value if self.source_type else None,
             "source_schema": self.source_schema,
             "source_table": self.source_table,
             "source_query": self.source_query,
+            "file_format": self.file_format,
+            "file_object_key": self.file_object_key,
+            "file_options": self.file_options or {},
             "columns_config": self.columns_config or [],
             "primary_key_columns": self.primary_key_columns or [],
             "incremental_cursor_column": self.incremental_cursor_column,
@@ -237,7 +283,14 @@ class DltPipeline(db.Model):
         return hashlib.sha256(self.generated_code.encode()).hexdigest()
     
     def get_template_name(self) -> str:
-        """Determine the template name based on write disposition."""
+        """Determine the template name based on source kind and write disposition.
+
+        File-source pipelines (csv/xlsx/parquet/json) always use the file template;
+        the write disposition is honoured inside the template itself.
+        """
+        if (self.source_kind or DltSourceKind.SQL.value) == DltSourceKind.FILE.value:
+            return "dlt/file_pipeline.py.j2"
+
         disposition = self.write_disposition
         if disposition == WriteDisposition.SCD2:
             return "dlt/scd2_pipeline.py.j2"
@@ -254,16 +307,35 @@ class DltPipeline(db.Model):
             List of validation error messages (empty if valid)
         """
         errors = []
-        
-        # Source validation
-        if self.source_type == SourceType.TABLE:
-            if not self.source_table:
-                errors.append("Source table is required when source_type is 'table'")
-        elif self.source_type == SourceType.QUERY:
-            if not self.source_query:
-                errors.append("Source query is required when source_type is 'query'")
-        
-        # Column validation
+        kind = self.source_kind or DltSourceKind.SQL.value
+
+        if kind == DltSourceKind.FILE.value:
+            # File-source validation
+            if self.connection_id is not None:
+                errors.append("connection_id must be empty for file-source pipelines")
+            if not self.file_format:
+                errors.append("file_format is required for file-source pipelines")
+            elif self.file_format not in {f.value for f in FileFormat}:
+                errors.append(
+                    f"file_format must be one of {sorted({f.value for f in FileFormat})}"
+                )
+            if not self.file_object_key:
+                errors.append("file_object_key is required for file-source pipelines")
+            elif not str(self.file_object_key).startswith("raw_uploads/"):
+                errors.append("file_object_key must live under 'raw_uploads/'")
+        else:
+            # SQL-source validation
+            if self.connection_id is None:
+                errors.append("connection_id is required for SQL-source pipelines")
+            if self.source_type == SourceType.TABLE:
+                if not self.source_table:
+                    errors.append("Source table is required when source_type is 'table'")
+            elif self.source_type == SourceType.QUERY:
+                if not self.source_query:
+                    errors.append("Source query is required when source_type is 'query'")
+
+        # Column validation (applies to both kinds; for file-source, columns are
+        # the projected output columns).
         if not self.columns_config or len(self.get_selected_columns()) == 0:
             errors.append("At least one column must be selected")
         

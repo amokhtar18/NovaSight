@@ -28,17 +28,32 @@ WARNING: Auto-generated file - do not edit manually
 -#}
 {% raw %}{{{% endraw %}
   config(
-    materialized='view',
-    tags=['staging', '{{ source_name }}']
+    materialized='{{ materialized | default("view") }}',
+    tags=['staging', '{{ source_name | default("iceberg") }}']
   )
 {% raw %}}}{% endraw %}
 
-{#- Staging layer: minimal transformation, 1:1 with source -#}
+{#-
+Staging layer: minimal transformation, 1:1 with source.
+
+Source resolution depends on ``source_kind``:
+  * ``warehouse``  → reads from a dbt ``source()`` (a ClickHouse table
+                     declared in a sources.yml file).
+  * ``iceberg``    → reads from an Iceberg table on the tenant's S3
+                     bucket via ClickHouse's native ``iceberg()`` table
+                     function. The model still materializes into the
+                     tenant's ClickHouse database (single materialization
+                     target — see profiles.yml).
+-#}
 
 WITH source AS (
     SELECT *
+{% if source_kind | default('warehouse') == 'iceberg' %}
+    FROM iceberg('{{ iceberg_s3_uri }}')
+{% else %}
     FROM {% raw %}{{ source('{% endraw %}{{ source_name }}{% raw %}', '{% endraw %}{{ source_table }}{% raw %}') }}{% endraw %}
 
+{% endif %}
 ),
 
 renamed AS (

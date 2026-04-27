@@ -48,9 +48,74 @@ const INCREMENTAL_TYPES: { value: IncrementalCursorType; label: string; descript
   { value: 'version', label: 'Version Column', description: 'Incremental by version number' },
 ]
 
+// Must match the keys of PRESET_TO_CRON in
+// backend/orchestration/schedules/dlt_schedules.py
+type SchedulePresetValue =
+  | 'manual'
+  | 'every_15_min'
+  | 'every_30_min'
+  | 'hourly'
+  | 'every_6_hours'
+  | 'every_12_hours'
+  | 'daily'
+  | 'weekly'
+  | 'monthly'
+  | 'custom'
+
+const SCHEDULE_PRESETS: { value: SchedulePresetValue; label: string; description: string }[] = [
+  { value: 'manual', label: 'Manual', description: 'No schedule — run on demand only' },
+  { value: 'every_15_min', label: 'Every 15 minutes', description: 'High-frequency near-real-time loads' },
+  { value: 'every_30_min', label: 'Every 30 minutes', description: 'Frequent incremental loads' },
+  { value: 'hourly', label: 'Hourly', description: 'Top of every hour' },
+  { value: 'every_6_hours', label: 'Every 6 hours', description: 'Four times a day' },
+  { value: 'every_12_hours', label: 'Every 12 hours', description: 'Twice daily' },
+  { value: 'daily', label: 'Daily', description: 'Once per day at midnight' },
+  { value: 'weekly', label: 'Weekly', description: 'Once per week (Sunday 00:00)' },
+  { value: 'monthly', label: 'Monthly', description: 'First day of every month' },
+  { value: 'custom', label: 'Custom (cron)', description: 'Provide a custom cron expression' },
+]
+
+function readSchedulePreset(options: Record<string, unknown>): SchedulePresetValue {
+  const preset = typeof options.schedule_preset === 'string' ? options.schedule_preset : ''
+  const cron = typeof options.schedule_cron === 'string' ? options.schedule_cron : ''
+  if (cron) return 'custom'
+  const known = SCHEDULE_PRESETS.find((p) => p.value === preset)
+  if (known) return known.value
+  return 'manual'
+}
+
 export function TargetConfiguration({ state, onStateChange }: TargetConfigurationProps) {
   const requiresPrimaryKey = state.writeDisposition === 'merge' || state.writeDisposition === 'scd2'
   const hasPrimaryKey = state.primaryKeyColumns && state.primaryKeyColumns.length > 0
+
+  const options = state.options || {}
+  const schedulePreset = readSchedulePreset(options)
+  const customCron =
+    typeof options.schedule_cron === 'string' ? (options.schedule_cron as string) : ''
+
+  const handleScheduleChange = (preset: SchedulePresetValue) => {
+    const next: Record<string, unknown> = { ...options }
+    // Reset both fields, then set whichever applies.
+    delete next.schedule_preset
+    delete next.schedule_cron
+    if (preset === 'custom') {
+      next.schedule_cron = customCron || ''
+    } else if (preset !== 'manual') {
+      next.schedule_preset = preset
+    }
+    onStateChange({ options: next })
+  }
+
+  const handleCronChange = (cron: string) => {
+    const next: Record<string, unknown> = { ...options }
+    delete next.schedule_preset
+    if (cron) {
+      next.schedule_cron = cron
+    } else {
+      delete next.schedule_cron
+    }
+    onStateChange({ options: next })
+  }
 
   return (
     <div className="space-y-6">
@@ -170,6 +235,50 @@ export function TargetConfiguration({ state, onStateChange }: TargetConfiguratio
               Go back to Column Selection and select an incremental cursor column.
             </AlertDescription>
           </Alert>
+        )}
+      </div>
+
+      {/* Schedule */}
+      <div className="space-y-3">
+        <Label>Schedule</Label>
+        <p className="text-xs text-muted-foreground">
+          Pick how often this pipeline should run. Manual pipelines do not appear in the
+          scheduler — choose a preset or a custom cron to enable automatic runs.
+        </p>
+        <RadioGroup
+          value={schedulePreset}
+          onValueChange={(value: SchedulePresetValue) => handleScheduleChange(value)}
+          className="grid grid-cols-2 gap-3"
+        >
+          {SCHEDULE_PRESETS.map((option) => (
+            <div
+              key={option.value}
+              className={`flex items-start space-x-3 p-3 border rounded-lg cursor-pointer hover:bg-accent ${
+                schedulePreset === option.value ? 'border-primary bg-accent' : ''
+              }`}
+            >
+              <RadioGroupItem value={option.value} id={`sched-${option.value}`} className="mt-1" />
+              <Label htmlFor={`sched-${option.value}`} className="flex-1 cursor-pointer">
+                <span className="font-medium">{option.label}</span>
+                <span className="text-muted-foreground ml-2 text-sm">— {option.description}</span>
+              </Label>
+            </div>
+          ))}
+        </RadioGroup>
+        {schedulePreset === 'custom' && (
+          <div className="space-y-1">
+            <Label htmlFor="schedule-cron">Cron expression *</Label>
+            <Input
+              id="schedule-cron"
+              value={customCron}
+              onChange={(e) => handleCronChange(e.target.value)}
+              placeholder="e.g. 0 2 * * *"
+              className="max-w-xs font-mono"
+            />
+            <p className="text-xs text-muted-foreground">
+              Standard 5-field cron (min hour day month weekday).
+            </p>
+          </div>
         )}
       </div>
 

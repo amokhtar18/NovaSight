@@ -60,18 +60,18 @@ class TriggerRule(enum.Enum):
 
 
 class TaskType(enum.Enum):
-    """Task type enumeration."""
+    """
+    Task type enumeration.
+
+    NovaSight orchestration schedules **only dlt and dbt jobs** (post Spark→dlt
+    migration). Adding new task types requires a corresponding asset builder
+    in ``AssetFactory`` and a frontend palette entry.
+    """
     DLT_RUN = "dlt_run"
     DBT_RUN = "dbt_run"
     DBT_TEST = "dbt_test"
     DBT_RUN_LAKE = "dbt_run_lake"
     DBT_RUN_WAREHOUSE = "dbt_run_warehouse"
-    SQL_QUERY = "sql_query"
-    EMAIL = "email"
-    HTTP_SENSOR = "http_sensor"
-    TIME_SENSOR = "time_sensor"
-    PYTHON_OPERATOR = "python_operator"
-    BASH_OPERATOR = "bash_operator"
 
 
 # ---------------------------------------------------------------------------
@@ -209,8 +209,15 @@ class DagConfig(TenantMixin, TimestampMixin, db.Model):
 
     @property
     def full_dag_id(self) -> str:
-        """Get tenant-prefixed pipeline ID."""
-        return f"{self.tenant.slug}_{self.dag_id}"
+        """Get tenant-prefixed pipeline ID, sanitized for Dagster.
+
+        Dagster requires names to match ``^[A-Za-z0-9_]+$``, so any
+        hyphens or other punctuation in the tenant slug or dag_id are
+        replaced with underscores.
+        """
+        import re
+        raw = f"{self.tenant.slug}_{self.dag_id}"
+        return re.sub(r"[^A-Za-z0-9_]", "_", raw)
 
 
 # ---------------------------------------------------------------------------

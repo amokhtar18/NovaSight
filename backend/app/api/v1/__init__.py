@@ -37,6 +37,7 @@ from app.domains.transformation.api import visual_model_routes  # noqa: F401
 
 # Ingestion domain routes (canonical) - dlt pipelines
 from app.domains.ingestion.api.dlt_routes import dlt_pipeline_bp  # noqa: F401
+from app.domains.ingestion.api.dlt_uploads import dlt_uploads_bp  # noqa: F401
 
 # AI domain routes (canonical)
 from app.domains.ai.api import assistant_routes  # noqa: F401
@@ -57,3 +58,4 @@ api_v1_bp.register_blueprint(dagster_proxy_bp)
 
 # Register dlt pipeline routes (ingestion)
 api_v1_bp.register_blueprint(dlt_pipeline_bp)
+api_v1_bp.register_blueprint(dlt_uploads_bp)

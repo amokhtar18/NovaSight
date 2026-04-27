@@ -1,59 +1,62 @@
+# NOTE on the ClickHouse port:
+# The dbt-clickhouse adapter speaks the HTTP protocol on port 8123. The rest
+# of the NovaSight platform (clickhouse-driver / native protocol) uses 9000,
+# which is what `CLICKHOUSE_PORT` is set to in docker-compose. We therefore
+# resolve the dbt-side port from `DBT_CLICKHOUSE_PORT` first and fall back to
+# 8123 -- we deliberately do NOT read `CLICKHOUSE_PORT` here so that running
+# `dbt run` directly inside the backend container works out of the box.
 novasight:
   target: "{{ env_var('DBT_TARGET', 'dev') }}"
   outputs:
     # =========================================================================
-    # Lake target: dbt-duckdb reading from Iceberg on S3
-    # Used for staging and intermediate layers
-    # =========================================================================
-    lake:
-      type: duckdb
-      path: ":memory:"
-      threads: "{{ env_var('DUCKDB_THREADS', 4) | int }}"
-      extensions:
-        - iceberg
-        - httpfs
-      settings:
-        # S3 configuration for Iceberg access
-        s3_region: "{{ env_var('AWS_REGION', 'us-east-1') }}"
-        s3_endpoint: "{{ env_var('S3_ENDPOINT_URL', '') }}"
-        s3_access_key_id: "{{ env_var('AWS_ACCESS_KEY_ID', '') }}"
-        s3_secret_access_key: "{{ env_var('AWS_SECRET_ACCESS_KEY', '') }}"
-        s3_url_style: "path"
-        memory_limit: "{{ env_var('DUCKDB_MEMORY_LIMIT', '4GB') }}"
-      
-    # =========================================================================
-    # Warehouse target: dbt-clickhouse writing to marts
-    # Used for marts/materialized tables for analytics
-    # =========================================================================
-    warehouse:
-      type: clickhouse
-      schema: "{{ env_var('TENANT_DATABASE', 'default') }}"
-      host: "{{ env_var('CLICKHOUSE_HOST', 'localhost') }}"
-      port: "{{ env_var('CLICKHOUSE_PORT', 8123) | int }}"
-      user: "{{ env_var('CLICKHOUSE_USER', 'default') }}"
-      password: "{{ env_var('CLICKHOUSE_PASSWORD', '') }}"
-      secure: false
-      verify: false
-
-    # =========================================================================
-    # Legacy targets (backward compatibility)
+    # All dbt Studio models materialize into the tenant's ClickHouse database.
+    #
+    # Iceberg / Lake data is read from the tenant's S3 bucket via ClickHouse's
+    # native ``iceberg(...)`` table function — there is no separate DuckDB /
+    # lake materialization target. ClickHouse is the single source of truth
+    # for all model outputs (staging views, intermediate ephemeral CTEs, marts
+    # tables).
     # =========================================================================
     dev:
       type: clickhouse
       schema: "{{ env_var('TENANT_DATABASE', 'default') }}"
       host: "{{ env_var('CLICKHOUSE_HOST', 'localhost') }}"
-      port: "{{ env_var('CLICKHOUSE_PORT', 8123) | int }}"
+      port: "{{ env_var('DBT_CLICKHOUSE_PORT', '8123') | int }}"
       user: "{{ env_var('CLICKHOUSE_USER', 'default') }}"
       password: "{{ env_var('CLICKHOUSE_PASSWORD', '') }}"
       secure: false
       verify: false
-      
+
     prod:
       type: clickhouse
       schema: "{{ env_var('TENANT_DATABASE') }}"
       host: "{{ env_var('CLICKHOUSE_HOST') }}"
-      port: "{{ env_var('CLICKHOUSE_PORT', 8123) | int }}"
+      port: "{{ env_var('DBT_CLICKHOUSE_PORT', '8123') | int }}"
       user: "{{ env_var('CLICKHOUSE_USER') }}"
       password: "{{ env_var('CLICKHOUSE_PASSWORD') }}"
       secure: true
       verify: true
+
+    # Backward-compatibility aliases. These previously pointed at a
+    # dbt-duckdb / Iceberg target; they now resolve to the same ClickHouse
+    # configuration so any orchestration code passing ``--target lake`` or
+    # ``--target warehouse`` continues to work without code changes.
+    lake:
+      type: clickhouse
+      schema: "{{ env_var('TENANT_DATABASE', 'default') }}"
+      host: "{{ env_var('CLICKHOUSE_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_CLICKHOUSE_PORT', '8123') | int }}"
+      user: "{{ env_var('CLICKHOUSE_USER', 'default') }}"
+      password: "{{ env_var('CLICKHOUSE_PASSWORD', '') }}"
+      secure: false
+      verify: false
+
+    warehouse:
+      type: clickhouse
+      schema: "{{ env_var('TENANT_DATABASE', 'default') }}"
+      host: "{{ env_var('CLICKHOUSE_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_CLICKHOUSE_PORT', '8123') | int }}"
+      user: "{{ env_var('CLICKHOUSE_USER', 'default') }}"
+      password: "{{ env_var('CLICKHOUSE_PASSWORD', '') }}"
+      secure: false
+      verify: false

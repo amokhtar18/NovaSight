@@ -2,26 +2,17 @@
  * Data Source types
  */
 
-export type DatabaseType = 
+export type DatabaseType =
   | 'postgresql'
   | 'mysql'
   | 'oracle'
   | 'sqlserver'
   | 'mongodb'
   | 'clickhouse'
-  | 'flatfile'
-  | 'excel'
-  | 'sqlite'
 
-export type SourceCategory = 'database' | 'file'
+export type SourceCategory = 'database'
 
-export const FILE_BASED_TYPES: ReadonlySet<DatabaseType> = new Set(['flatfile', 'excel', 'sqlite'])
-
-export function isFileBased(dbType: DatabaseType): boolean {
-  return FILE_BASED_TYPES.has(dbType)
-}
-
-export type ConnectionStatus = 
+export type ConnectionStatus =
   | 'active'
   | 'inactive'
   | 'testing'
@@ -43,19 +34,11 @@ export interface DataSource {
   updated_at: string
   tenant_id: string
   extra_params?: Record<string, unknown>
-  /** Present for file-based sources */
-  file_info?: {
-    file_name?: string
-    file_size?: number
-    file_format?: string
-    file_hash?: string
-  }
 }
 
 export interface DataSourceCreate {
   name: string
   db_type: DatabaseType
-  // Database source fields (required for db, omitted for file)
   host?: string
   port?: number
   database?: string
@@ -64,8 +47,6 @@ export interface DataSourceCreate {
   ssl_enabled?: boolean
   schema_name?: string
   extra_params?: Record<string, unknown>
-  // File-based source field
-  upload_token?: string
 }
 
 export interface DataSourceUpdate {
@@ -165,23 +146,6 @@ export interface DatabaseTypeInfo {
   supportsSchemas: boolean
   description: string
   category: SourceCategory
-  acceptedExtensions?: string[]
-  requiresUpload?: boolean
-}
-
-export interface FileUploadMetadata {
-  file_ref: string
-  file_hash: string
-  file_name: string
-  file_size: number
-  file_format: string
-  upload_token: string
-  introspection: {
-    sheets?: Array<{ name: string; columns: ColumnInfo[]; preview_rows: unknown[] }>
-    columns?: ColumnInfo[]
-    preview_rows?: unknown[]
-    tables?: Array<{ name: string; row_count: number; columns: ColumnInfo[] }>
-  }
 }
 
 export const DATABASE_TYPES: Record<DatabaseType, DatabaseTypeInfo> = {
@@ -244,41 +208,5 @@ export const DATABASE_TYPES: Record<DatabaseType, DatabaseTypeInfo> = {
     supportsSchemas: true,
     description: 'Columnar OLAP database',
     category: 'database',
-  },
-  flatfile: {
-    type: 'flatfile',
-    name: 'Flat File',
-    icon: 'file-text',
-    defaultPort: 0,
-    supportsSSL: false,
-    supportsSchemas: false,
-    description: 'CSV, TSV, JSON, or Parquet file',
-    category: 'file',
-    acceptedExtensions: ['.csv', '.tsv', '.txt', '.json', '.parquet'],
-    requiresUpload: true,
-  },
-  excel: {
-    type: 'excel',
-    name: 'Excel Spreadsheet',
-    icon: 'table-2',
-    defaultPort: 0,
-    supportsSSL: false,
-    supportsSchemas: false,
-    description: 'Excel workbook (.xlsx, .xls)',
-    category: 'file',
-    acceptedExtensions: ['.xlsx', '.xls'],
-    requiresUpload: true,
-  },
-  sqlite: {
-    type: 'sqlite',
-    name: 'SQLite Database',
-    icon: 'database',
-    defaultPort: 0,
-    supportsSSL: false,
-    supportsSchemas: false,
-    description: 'Portable SQLite database file',
-    category: 'file',
-    acceptedExtensions: ['.sqlite', '.sqlite3', '.db'],
-    requiresUpload: true,
   },
 }

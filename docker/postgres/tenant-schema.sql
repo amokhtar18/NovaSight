@@ -36,7 +36,8 @@ CREATE INDEX idx_{schema}_connections_status ON {schema}.data_connections(status
 -- =========================================
 -- INGESTION JOBS
 -- =========================================
--- Configures Spark ingestion jobs for data extraction
+-- Configures dlt ingestion jobs that land data in Iceberg-on-S3
+-- (replaces the legacy Spark ingestion jobs).
 
 CREATE TABLE IF NOT EXISTS {schema}.ingestion_jobs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -50,7 +51,7 @@ CREATE TABLE IF NOT EXISTS {schema}.ingestion_jobs (
     incremental_column VARCHAR(255),
     partitioning JSONB DEFAULT '{}',
     schedule_cron VARCHAR(100),
-    spark_config JSONB DEFAULT '{}',
+    dlt_config JSONB DEFAULT '{}',
     status VARCHAR(50) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'error')),
     last_run_at TIMESTAMP WITH TIME ZONE,
     last_run_status VARCHAR(50),
@@ -124,7 +125,7 @@ CREATE TABLE IF NOT EXISTS {schema}.task_configs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     dag_config_id UUID NOT NULL REFERENCES {schema}.dag_configs(id) ON DELETE CASCADE,
     task_id VARCHAR(64) NOT NULL CHECK (task_id ~ '^[a-z][a-z0-9_]*$'),
-    task_type VARCHAR(50) NOT NULL CHECK (task_type IN ('spark_submit', 'dbt_run', 'dbt_test', 'sql_query', 'email', 'http_sensor', 'time_sensor', 'python')),
+    task_type VARCHAR(50) NOT NULL CHECK (task_type IN ('dlt_run', 'dbt_run', 'dbt_test', 'sql_query', 'email', 'http_sensor', 'time_sensor', 'python')),
     config JSONB NOT NULL DEFAULT '{}',
     timeout_minutes INTEGER NOT NULL DEFAULT 60 CHECK (timeout_minutes BETWEEN 1 AND 1440),
     retries INTEGER NOT NULL DEFAULT 1 CHECK (retries BETWEEN 0 AND 5),

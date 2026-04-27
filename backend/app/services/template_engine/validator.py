@@ -299,8 +299,7 @@ class PipelineTaskDefinition(BaseModel):
     
     task_id: str = Field(..., min_length=1, max_length=250)
     task_type: Literal[
-        'spark_submit', 'dbt_run', 'dbt_test', 'python', 'bash',
-        'http_sensor', 'time_sensor', 'email', 'sql'
+        'dlt_run', 'dbt_run', 'dbt_test', 'dbt_run_lake', 'dbt_run_warehouse'
     ] = Field(...)
     config: Dict[str, Any] = Field(default_factory=dict)
     upstream_tasks: List[str] = Field(default_factory=list)

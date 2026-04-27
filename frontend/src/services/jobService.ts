@@ -2,8 +2,12 @@
  * NovaSight Unified Job Service
  * ==============================
  *
- * Frontend API client for Dagster jobs with remote Spark execution.
- * Replaces separate DAG and PySpark orchestration services with a unified interface.
+ * Frontend API client for Dagster jobs.
+ *
+ * Post Spark→dlt migration the orchestrator schedules **only dlt and dbt
+ * jobs** — see ``backend/app/domains/orchestration/domain/models.py``
+ * (``TaskType``) and the ``ALLOWED_TASK_TYPES`` constant in
+ * ``asset_factory.py``.
  */
 
 import { apiClient } from './apiClient'
@@ -17,7 +21,7 @@ export interface Job {
   dag_id: string
   job_name: string
   description?: string
-  type: 'spark' | 'pipeline'
+  type: 'dlt' | 'dbt' | 'pipeline'
   status: 'draft' | 'active' | 'paused' | 'archived'
   schedule_type: 'cron' | 'preset' | 'manual'
   schedule_cron?: string
@@ -66,9 +70,9 @@ export interface JobLog {
 }
 
 export interface CreateJobRequest {
-  pyspark_app_id: string
+  /** dlt pipeline UUID. The legacy field name is kept for backwards compat. */
+  pipeline_id: string
   schedule?: string
-  spark_config?: Record<string, unknown>
   name?: string
   description?: string
   notifications?: {
@@ -80,13 +84,30 @@ export interface CreateJobRequest {
   retry_delay_minutes?: number
 }
 
+export interface CreateDbtJobRequest {
+  /** ``"run"`` or ``"test"`` */
+  kind: 'run' | 'test'
+  /** dbt profile to target */
+  profile?: 'default' | 'lake' | 'warehouse'
+  name?: string
+  description?: string
+  schedule?: string
+  /** dbt --select expression */
+  select?: string
+  /** dbt tag selectors (run only); takes precedence over `select` */
+  tags?: string[]
+  /** Run with --full-refresh (run only) */
+  full_refresh?: boolean
+  retries?: number
+  retry_delay_minutes?: number
+}
+
 export interface CreatePipelineRequest {
-  pyspark_app_ids: string[]
+  pipeline_ids: string[]
   name: string
   description?: string
   schedule?: string
   parallel?: boolean
-  spark_config?: Record<string, unknown>
 }
 
 export interface TriggerJobRequest {
@@ -117,7 +138,7 @@ class JobService {
     page?: number
     per_page?: number
     status?: string
-    type?: 'spark' | 'pipeline' | 'dbt'
+    type?: 'dlt' | 'dbt' | 'pipeline'
   }): Promise<PaginatedResponse<Job>> {
     const response = await apiClient.get<{
       jobs: Job[]
@@ -148,6 +169,11 @@ class JobService {
 
   async createPipeline(data: CreatePipelineRequest): Promise<Job> {
     const response = await apiClient.post<{ job: Job }>(`${this.baseUrl}/pipeline`, data)
+    return response.data.job
+  }
+
+  async createDbtJob(data: CreateDbtJobRequest): Promise<Job> {
+    const response = await apiClient.post<{ job: Job }>(`${this.baseUrl}/dbt`, data)
     return response.data.job
   }
 

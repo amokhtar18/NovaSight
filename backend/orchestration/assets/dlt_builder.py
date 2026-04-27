@@ -17,6 +17,7 @@ All generated dlt code comes from pre-approved Jinja2 templates
 (ADR-002: Template Engine Rule compliance).
 """
 
+import json
 import os
 import subprocess
 import re
@@ -305,25 +306,35 @@ def _build_pipeline_env(
         "postgresql://novasight:novasight@postgres:5432/novasight_platform"
     )
     
-    # Get source connection string
+    # Get source connection string OR file-source env
     try:
         from app import create_app
-        from app.domains.ingestion.domain.models import DltPipeline
+        from app.domains.ingestion.domain.models import DltPipeline, DltSourceKind
         from app.domains.datasources.application.connection_service import ConnectionService
-        
+
         app = create_app()
         with app.app_context():
             pipeline = DltPipeline.query.get(pipeline_id)
-            if pipeline and pipeline.connection_id:
+            if pipeline is None:
+                raise RuntimeError(f"Pipeline {pipeline_id} not found")
+
+            kind = pipeline.source_kind or DltSourceKind.SQL.value
+            if kind == DltSourceKind.FILE.value:
+                # File-source pipelines read directly from the tenant S3
+                # bucket; the env above already carries the S3 creds.
+                env["FILE_OBJECT_KEY"] = pipeline.file_object_key or ""
+                env["FILE_FORMAT"] = pipeline.file_format or ""
+                env["FILE_OPTIONS_JSON"] = json.dumps(pipeline.file_options or {})
+            elif pipeline.connection_id:
+                # SQL-source: inject the database connection string
                 conn_service = ConnectionService()
                 connection = conn_service.get_connection(str(pipeline.connection_id))
                 if connection:
-                    # Build connection string
                     env["SOURCE_CONNECTION_STRING"] = conn_service.get_connection_string(
                         str(pipeline.connection_id)
                     )
     except Exception as e:
-        context.log.warning(f"Could not load connection string: {e}")
+        context.log.warning(f"Could not load pipeline source env: {e}")
     
     return env
 

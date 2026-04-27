@@ -12,9 +12,11 @@ import type {
   PipelinePreviewRequest,
   PipelinePreviewResponse,
   PipelineRunResponse,
+  FileUploadResult,
 } from '@/types/pipeline'
 
 const PIPELINES_BASE = '/api/v1/pipelines'
+const UPLOADS_BASE = '/api/v1/dlt/uploads'
 
 export const pipelineService = {
   /**
@@ -43,14 +45,22 @@ export const pipelineService = {
    * Create a new pipeline
    */
   async create(data: PipelineFormData): Promise<Pipeline> {
+    const isFile = data.sourceKind === 'file'
     const payload = {
       name: data.name,
       description: data.description,
-      connection_id: data.connectionId,
+      source_kind: data.sourceKind,
+      // SQL-source
+      connection_id: isFile ? null : data.connectionId,
       source_type: data.sourceType,
-      source_schema: data.sourceSchema,
-      source_table: data.sourceTable,
-      source_query: data.sourceQuery,
+      source_schema: isFile ? null : data.sourceSchema,
+      source_table: isFile ? null : data.sourceTable,
+      source_query: isFile ? null : data.sourceQuery,
+      // File-source
+      file_format: isFile ? data.fileFormat : null,
+      file_object_key: isFile ? data.fileObjectKey : null,
+      file_options: isFile ? (data.fileOptions || {}) : {},
+      // Common
       columns_config: data.columnsConfig,
       primary_key_columns: data.primaryKeyColumns,
       incremental_cursor_column: data.incrementalCursorColumn,
@@ -141,5 +151,33 @@ export const pipelineService = {
   async run(id: string): Promise<PipelineRunResponse> {
     const response = await apiClient.post<PipelineRunResponse>(`${PIPELINES_BASE}/${id}/run`)
     return response.data
+  },
+
+  /**
+   * Upload a flat file / spreadsheet to the tenant S3 bucket. The returned
+   * ``object_key`` is what gets stored on a file-source pipeline.
+   */
+  async uploadFile(
+    file: File,
+    onProgress?: (percent: number) => void,
+  ): Promise<FileUploadResult> {
+    const form = new FormData()
+    form.append('file', file)
+    const response = await apiClient.post<FileUploadResult>(UPLOADS_BASE, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (evt) => {
+        if (onProgress && evt.total) {
+          onProgress(Math.round((evt.loaded * 100) / evt.total))
+        }
+      },
+    })
+    return response.data
+  },
+
+  /**
+   * Delete a previously uploaded file by its object_key.
+   */
+  async deleteUpload(objectKey: string): Promise<void> {
+    await apiClient.delete(`${UPLOADS_BASE}/${objectKey}`)
   },
 }

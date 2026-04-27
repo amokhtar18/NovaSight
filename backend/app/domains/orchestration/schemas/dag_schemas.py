@@ -25,16 +25,18 @@ class TriggerRule(str, Enum):
 
 
 class TaskType(str, Enum):
-    """Task type enumeration."""
-    SPARK_SUBMIT = "spark_submit"
+    """
+    Task type enumeration.
+
+    Orchestrator schedules **only dlt and dbt jobs**. Keep in sync with the
+    SQLAlchemy ``TaskType`` enum in
+    ``app.domains.orchestration.domain.models``.
+    """
+    DLT_RUN = "dlt_run"
     DBT_RUN = "dbt_run"
     DBT_TEST = "dbt_test"
-    SQL_QUERY = "sql_query"
-    EMAIL = "email"
-    HTTP_SENSOR = "http_sensor"
-    TIME_SENSOR = "time_sensor"
-    PYTHON_OPERATOR = "python_operator"
-    BASH_OPERATOR = "bash_operator"
+    DBT_RUN_LAKE = "dbt_run_lake"
+    DBT_RUN_WAREHOUSE = "dbt_run_warehouse"
 
 
 class TaskConfigCreate(BaseModel):
@@ -51,13 +53,13 @@ class TaskConfigCreate(BaseModel):
     position: Optional[Dict[str, int]] = Field(default=None)
 
 
-class SparkSubmitTaskConfig(TaskConfigCreate):
-    """Spark submit task configuration."""
+class DltRunTaskConfig(TaskConfigCreate):
+    """dlt pipeline run task configuration."""
 
-    task_type: Literal[TaskType.SPARK_SUBMIT] = TaskType.SPARK_SUBMIT
+    task_type: Literal[TaskType.DLT_RUN] = TaskType.DLT_RUN
     config: Dict[str, Any] = Field(
         ...,
-        description="Spark configuration including ingestion_job_id, executor_memory, etc.",
+        description="dlt configuration including pipeline_id, notifications, etc.",
     )
 
 
@@ -70,13 +72,12 @@ class DbtRunTaskConfig(TaskConfigCreate):
     )
 
 
-class EmailTaskConfig(TaskConfigCreate):
-    """Email task configuration."""
+class DbtTestTaskConfig(TaskConfigCreate):
+    """dbt test task configuration."""
 
-    task_type: Literal[TaskType.EMAIL] = TaskType.EMAIL
+    task_type: Literal[TaskType.DBT_TEST] = TaskType.DBT_TEST
     config: Dict[str, Any] = Field(
-        ...,
-        description="Email configuration including recipients, subject, body_template",
+        default_factory=lambda: {"select": "*"},
     )
 
 

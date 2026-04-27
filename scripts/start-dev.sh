@@ -7,7 +7,6 @@
 # Usage: ./scripts/start-dev.sh [options]
 #
 # Options:
-#   --no-spark    Skip Spark cluster
 #   --no-ollama   Skip Ollama LLM
 #   --build       Force rebuild containers
 #   --clean       Remove volumes and start fresh
@@ -26,7 +25,6 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Parse arguments
-NO_SPARK=false
 NO_OLLAMA=false
 BUILD=false
 CLEAN=false
@@ -34,7 +32,7 @@ CLEAN=false
 for arg in "$@"; do
     case $arg in
         --no-spark)
-            NO_SPARK=true
+            # Spark removed; flag accepted as no-op for backward compatibility
             shift
             ;;
         --no-ollama)
@@ -68,11 +66,6 @@ fi
 
 # Build services to exclude
 EXCLUDE_SERVICES=""
-if [ "$NO_SPARK" = true ]; then
-    EXCLUDE_SERVICES="$EXCLUDE_SERVICES --scale spark-master=0 --scale spark-worker-1=0 --scale spark-worker-2=0"
-    echo -e "${YELLOW}Skipping Spark cluster${NC}"
-fi
-
 if [ "$NO_OLLAMA" = true ]; then
     EXCLUDE_SERVICES="$EXCLUDE_SERVICES --scale ollama=0"
     echo -e "${YELLOW}Skipping Ollama LLM${NC}"
@@ -99,11 +92,6 @@ echo -e "${BLUE}Starting Airflow API Server, DAG Processor, Scheduler, and Trigg
 docker compose up -d airflow-api-server airflow-dag-processor airflow-scheduler airflow-triggerer $BUILD_FLAG
 
 echo -e "${BLUE}Dagster is integrated into the backend service...${NC}"
-
-if [ "$NO_SPARK" = false ]; then
-    echo -e "${BLUE}Starting Spark cluster...${NC}"
-    docker compose up -d spark-master spark-worker-1 spark-worker-2
-fi
 
 if [ "$NO_OLLAMA" = false ]; then
     echo -e "${BLUE}Starting Ollama LLM...${NC}"
@@ -138,7 +126,6 @@ echo -e "  ${BLUE}Frontend:${NC}        http://localhost:5173"
 echo -e "  ${BLUE}Backend API:${NC}     http://localhost:5000"
 echo -e "  ${BLUE}Airflow UI:${NC}      http://localhost:8080  (airflow/airflow)"
 echo -e "  ${BLUE}Dagster UI:${NC}      http://localhost:3000"
-echo -e "  ${BLUE}Spark Master:${NC}    http://localhost:8081"
 echo -e "  ${BLUE}ClickHouse:${NC}      http://localhost:8123"
 echo -e "  ${BLUE}PostgreSQL:${NC}      localhost:5432"
 echo -e "  ${BLUE}Redis:${NC}           localhost:6379"

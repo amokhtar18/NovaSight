@@ -2,6 +2,23 @@
  * Pipeline TypeScript Types
  */
 
+export type SourceKind = 'sql' | 'file'
+
+export type FileFormat = 'csv' | 'tsv' | 'xlsx' | 'xls' | 'parquet' | 'json' | 'jsonl'
+
+export const FILE_FORMATS: FileFormat[] = ['csv', 'tsv', 'xlsx', 'xls', 'parquet', 'json', 'jsonl']
+
+export interface FileUploadResult {
+  object_key: string
+  bucket: string
+  size_bytes: number
+  file_format: FileFormat
+  original_filename: string
+  sheets: string[]
+  columns_preview: string[]
+  rows_preview?: Array<Record<string, unknown>>
+}
+
 export type SourceType = 'table' | 'query'
 
 export type WriteDisposition = 'append' | 'replace' | 'merge' | 'scd2'
@@ -20,11 +37,21 @@ export interface ColumnConfig {
 export interface PipelineFormData {
   name: string
   description?: string
-  connectionId: string
+  // Source kind discriminator
+  sourceKind: SourceKind
+  // SQL-source
+  connectionId?: string
   sourceType: SourceType
   sourceSchema?: string
   sourceTable?: string
   sourceQuery?: string
+  // File-source
+  fileFormat?: FileFormat
+  fileObjectKey?: string
+  fileOptions?: Record<string, unknown>
+  fileOriginalName?: string
+  fileSizeBytes?: number
+  // Common
   columnsConfig: ColumnConfig[]
   primaryKeyColumns: string[]
   incrementalCursorColumn?: string
@@ -39,14 +66,18 @@ export interface PipelineFormData {
 export interface Pipeline {
   id: string
   tenant_id: string
-  connection_id: string
+  connection_id: string | null
   name: string
   description?: string
   status: PipelineStatus
+  source_kind: SourceKind
   source_type: SourceType
   source_schema?: string
   source_table?: string
   source_query?: string
+  file_format?: FileFormat | null
+  file_object_key?: string | null
+  file_options?: Record<string, unknown>
   columns_config: ColumnConfig[]
   primary_key_columns: string[]
   incremental_cursor_column?: string
@@ -80,11 +111,15 @@ export interface PipelineListResponse {
 }
 
 export interface PipelinePreviewRequest {
-  connection_id: string
+  source_kind: SourceKind
+  connection_id?: string
   source_type: SourceType
   source_schema?: string
   source_table?: string
   source_query?: string
+  file_format?: FileFormat
+  file_object_key?: string
+  file_options?: Record<string, unknown>
   columns_config: ColumnConfig[]
   primary_key_columns: string[]
   incremental_cursor_column?: string
@@ -109,7 +144,7 @@ export interface PipelineRunResponse {
 }
 
 // Wizard step types
-export type WizardStep = 'source' | 'columns' | 'target' | 'review'
+export type WizardStep = 'kind' | 'source' | 'columns' | 'target' | 'review'
 
 export interface WizardState extends PipelineFormData {
   currentStep: WizardStep

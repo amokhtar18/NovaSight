@@ -86,13 +86,13 @@ if %errorlevel%==0 (
     set /a UNHEALTHY+=1
 )
 
-REM Check Spark
-curl -s -o nul -w "" --connect-timeout 2 http://localhost:8081 2>nul
+REM Check MinIO (S3 / Iceberg lake)
+curl -s -o nul -w "" --connect-timeout 2 http://localhost:9001/minio/health/live 2>nul
 if %errorlevel%==0 (
-    echo   [OK] Spark Master is healthy
+    echo   [OK] MinIO (S3 / Iceberg lake) is healthy
     set /a HEALTHY+=1
 ) else (
-    echo   [WARN] Spark Master is not responding (may be disabled)
+    echo   [WARN] MinIO is not responding (may be disabled)
     set /a UNHEALTHY+=1
 )
 

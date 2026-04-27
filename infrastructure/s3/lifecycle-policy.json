@@ -1,0 +1,22 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-old-iceberg-snapshots",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 30 }
+    },
+    {
+      "ID": "abort-incomplete-multipart-uploads",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+    },
+    {
+      "ID": "expire-tmp-prefix",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "_tmp/" },
+      "Expiration": { "Days": 7 }
+    }
+  ]
+}

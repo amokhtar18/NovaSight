@@ -41,7 +41,7 @@ const features = [
     icon: GitBranch,
     color: 'text-neon-green',
     bgColor: 'bg-neon-green/10',
-    href: '/app/dags',
+    href: '/app/jobs',
   },
   {
     title: 'Analytics',

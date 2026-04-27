@@ -136,6 +136,29 @@ def preview_visual_model(model_id: str):
     return jsonify(generated.dict())
 
 
+@api_v1_bp.route('/dbt/visual-models/preview', methods=['POST'])
+@authenticated
+@tenant_required
+@require_roles(['tenant_admin', 'data_engineer', 'analyst'])
+def preview_visual_model_from_payload():
+    """Preview generated SQL/YAML for an in-progress (unsaved) model.
+
+    The request body has the same shape as ``POST /visual-models``;
+    nothing is persisted and no files are written. Used by the dbt
+    Studio Model Builder to show the generated dbt code before the
+    user clicks Save.
+    """
+    _ = _get_tenant_id()  # enforce tenant context
+    data = request.get_json() or {}
+    try:
+        req = VisualModelCreateRequest(**data)
+    except Exception as e:
+        raise ValidationError(str(e))
+    service = get_visual_model_service()
+    generated = service.preview_from_request(req)
+    return jsonify(generated.dict())
+
+
 @api_v1_bp.route('/dbt/visual-models/<model_id>/canvas', methods=['PUT'])
 @authenticated
 @tenant_required
@@ -217,6 +240,24 @@ def list_warehouse_columns():
     service = get_visual_model_service()
     columns = service.list_warehouse_columns(tenant_id, schema, table)
     return jsonify(columns)
+
+
+@api_v1_bp.route('/dbt/lake/tables', methods=['GET'])
+@authenticated
+@tenant_required
+@require_roles(['tenant_admin', 'data_engineer'])
+def list_lake_tables():
+    """List Iceberg tables on the tenant's S3 lake.
+
+    Each entry is a candidate source for dbt Studio staging models.
+    Selecting one renders the model with a ClickHouse ``iceberg('s3://...')``
+    table function reference; materialization always lands in the tenant's
+    ClickHouse database.
+    """
+    tenant_id = _get_tenant_id()
+    service = get_visual_model_service()
+    tables = service.list_lake_tables(tenant_id)
+    return jsonify(tables)
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•

@@ -6,11 +6,19 @@ Pydantic schemas for dlt pipeline API validation.
 """
 
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
+
+
+# Allowed file formats for FILE-kind pipelines
+FILE_FORMATS = ("csv", "tsv", "xlsx", "xls", "parquet", "json", "jsonl")
+
+# Allowed object key prefix for tenant uploads
+_RAW_UPLOADS_PREFIX = "raw_uploads/"
+_OBJECT_KEY_RE = re.compile(r"^raw_uploads/[A-Za-z0-9._\-/]+$")
 
 
 class ColumnConfig(BaseModel):
@@ -25,34 +33,42 @@ class DltPipelineBase(BaseModel):
     """Base schema for dlt pipeline."""
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=2000)
-    connection_id: UUID
-    
-    # Source configuration
+
+    # Source kind discriminator
+    source_kind: Literal["sql", "file"] = Field(default="sql")
+
+    # SQL-source fields
+    connection_id: Optional[UUID] = None
     source_type: str = Field(default="table", pattern="^(table|query)$")
     source_schema: Optional[str] = Field(None, max_length=255)
     source_table: Optional[str] = Field(None, max_length=255)
     source_query: Optional[str] = Field(None, max_length=50000)
-    
+
+    # File-source fields
+    file_format: Optional[str] = Field(None, max_length=16)
+    file_object_key: Optional[str] = Field(None, max_length=1024)
+    file_options: Dict[str, Any] = Field(default_factory=dict)
+
     # Column configuration
     columns_config: List[ColumnConfig] = Field(default_factory=list)
-    
+
     # Key configuration
     primary_key_columns: List[str] = Field(default_factory=list)
-    
+
     # Incremental configuration
     incremental_cursor_column: Optional[str] = Field(None, max_length=255)
     incremental_cursor_type: str = Field(default="none", pattern="^(none|timestamp|version)$")
-    
+
     # Write configuration
     write_disposition: str = Field(default="append", pattern="^(append|replace|merge|scd2)$")
-    
+
     # Partition configuration
     partition_columns: List[str] = Field(default_factory=list)
-    
+
     # Target configuration
     iceberg_namespace: Optional[str] = Field(None, max_length=255)
     iceberg_table_name: Optional[str] = Field(None, max_length=255)
-    
+
     # Additional options
     options: Dict[str, Any] = Field(default_factory=dict)
 
@@ -79,11 +95,34 @@ class DltPipelineBase(BaseModel):
 
     @model_validator(mode="after")
     def validate_source(self) -> "DltPipelineBase":
-        """Validate source configuration."""
-        if self.source_type == "table" and not self.source_table:
-            raise ValueError("source_table is required when source_type is 'table'")
-        if self.source_type == "query" and not self.source_query:
-            raise ValueError("source_query is required when source_type is 'query'")
+        """Cross-field validation for SQL- vs file-source pipelines."""
+        if self.source_kind == "file":
+            if self.connection_id is not None:
+                raise ValueError("connection_id must be omitted for file-source pipelines")
+            if not self.file_format:
+                raise ValueError("file_format is required for file-source pipelines")
+            if self.file_format not in FILE_FORMATS:
+                raise ValueError(
+                    f"file_format must be one of {FILE_FORMATS}"
+                )
+            if not self.file_object_key:
+                raise ValueError("file_object_key is required for file-source pipelines")
+            if not _OBJECT_KEY_RE.match(self.file_object_key):
+                raise ValueError(
+                    "file_object_key must start with 'raw_uploads/' and contain "
+                    "only letters, digits, '.', '_', '-', or '/'"
+                )
+        else:  # sql
+            if self.connection_id is None:
+                raise ValueError("connection_id is required for SQL-source pipelines")
+            if self.file_format or self.file_object_key:
+                raise ValueError(
+                    "file_format and file_object_key are only allowed for source_kind='file'"
+                )
+            if self.source_type == "table" and not self.source_table:
+                raise ValueError("source_table is required when source_type is 'table'")
+            if self.source_type == "query" and not self.source_query:
+                raise ValueError("source_query is required when source_type is 'query'")
         return self
 
     @model_validator(mode="after")
@@ -141,16 +180,24 @@ class DltPipelineResponse(BaseModel):
     """Response schema for dlt pipeline."""
     id: UUID
     tenant_id: UUID
-    connection_id: UUID
+    connection_id: Optional[UUID] = None
     name: str
     description: Optional[str]
     status: str
-    
+
+    # Source kind
+    source_kind: str = "sql"
+
     # Source configuration
     source_type: str
     source_schema: Optional[str]
     source_table: Optional[str]
     source_query: Optional[str]
+
+    # File-source
+    file_format: Optional[str] = None
+    file_object_key: Optional[str] = None
+    file_options: Dict[str, Any] = Field(default_factory=dict)
     
     # Column configuration
     columns_config: List[Dict[str, Any]]
@@ -207,32 +254,54 @@ class DltPipelineListResponse(BaseModel):
 
 class DltPipelinePreviewRequest(BaseModel):
     """Request schema for previewing generated code."""
-    connection_id: UUID
-    
-    # Source configuration
+    source_kind: Literal["sql", "file"] = Field(default="sql")
+
+    # SQL-source fields
+    connection_id: Optional[UUID] = None
     source_type: str = Field(default="table", pattern="^(table|query)$")
     source_schema: Optional[str] = Field(None, max_length=255)
     source_table: Optional[str] = Field(None, max_length=255)
     source_query: Optional[str] = Field(None, max_length=50000)
-    
+
+    # File-source fields
+    file_format: Optional[str] = Field(None, max_length=16)
+    file_object_key: Optional[str] = Field(None, max_length=1024)
+    file_options: Dict[str, Any] = Field(default_factory=dict)
+
     # Column configuration
     columns_config: List[ColumnConfig] = Field(default_factory=list)
-    
+
     # Key configuration
     primary_key_columns: List[str] = Field(default_factory=list)
-    
+
     # Incremental configuration
     incremental_cursor_column: Optional[str] = Field(None, max_length=255)
     incremental_cursor_type: str = Field(default="none", pattern="^(none|timestamp|version)$")
-    
+
     # Write configuration
     write_disposition: str = Field(default="append", pattern="^(append|replace|merge|scd2)$")
-    
+
     # Partition configuration
     partition_columns: List[str] = Field(default_factory=list)
-    
+
     # Target configuration
     iceberg_table_name: Optional[str] = Field(None, max_length=255)
+
+    @model_validator(mode="after")
+    def validate_source(self) -> "DltPipelinePreviewRequest":
+        if self.source_kind == "file":
+            if not self.file_format or self.file_format not in FILE_FORMATS:
+                raise ValueError(f"file_format must be one of {FILE_FORMATS}")
+            if not self.file_object_key or not _OBJECT_KEY_RE.match(self.file_object_key):
+                raise ValueError("file_object_key must start with 'raw_uploads/'")
+        else:
+            if self.connection_id is None:
+                raise ValueError("connection_id is required for SQL-source pipelines")
+            if self.source_type == "table" and not self.source_table:
+                raise ValueError("source_table is required when source_type is 'table'")
+            if self.source_type == "query" and not self.source_query:
+                raise ValueError("source_query is required when source_type is 'query'")
+        return self
 
 
 class DltPipelinePreviewResponse(BaseModel):

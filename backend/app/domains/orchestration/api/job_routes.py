@@ -2,16 +2,17 @@
 NovaSight Unified Orchestration API Routes
 ==========================================
 
-Merged API endpoints for Dagster job management with remote Spark execution.
-This replaces the separate DAGs and PySpark orchestration endpoints with a
-unified interface for:
+Unified API endpoints for Dagster job management.
 
-1. Creating Dagster jobs from PySpark apps
+Post Spark→dlt migration the orchestrator schedules **only dlt pipelines
+and dbt runs/tests**. Spark / PySpark scheduling has been removed.
+
+Endpoints cover:
+
+1. Creating Dagster jobs (single dlt pipeline, dlt pipeline-of-pipelines, dbt run/test)
 2. Managing job schedules
 3. Triggering and monitoring job runs
 4. Viewing job execution history
-
-All jobs execute spark-submit on remote Spark clusters via SSH.
 """
 
 from flask import request, jsonify, Blueprint
@@ -41,7 +42,7 @@ def list_jobs():
         - page: Page number (default: 1)
         - per_page: Items per page (default: 20)
         - status: Filter by status (active, paused, draft)
-        - type: Filter by type (spark, pipeline)
+        - type: Filter by type (dlt, dbt, pipeline)
     
     Returns:
         Paginated list of jobs with execution status
@@ -74,41 +75,41 @@ def list_jobs():
 @require_roles(["data_engineer", "tenant_admin"])
 def create_job():
     """
-    Create a new Dagster job for a PySpark app.
-    
+    Create a new Dagster job that runs a single dlt pipeline.
+
     Request Body:
-        - pyspark_app_id: UUID of the PySpark app to run (required)
+        - pipeline_id: UUID of the dlt pipeline to run (required)
         - schedule: Cron expression or preset (@hourly, @daily, etc.)
-        - spark_config: Optional Spark configuration overrides
         - name: Optional custom job name
         - description: Optional job description
         - notifications: Optional notification settings
         - retries: Number of retries on failure (default: 2)
         - retry_delay_minutes: Minutes between retries (default: 5)
-    
+
     Returns:
         Created job configuration
     """
     identity = get_current_identity()
     tenant_id = identity.tenant_id
     user_id = identity.user_id
-    
+
     data = request.get_json()
     if not data:
         raise ValidationError("Request body required")
-    
-    pyspark_app_id = data.get("pyspark_app_id")
-    if not pyspark_app_id:
-        raise ValidationError("pyspark_app_id is required")
-    
+
+    # Accept legacy `pyspark_app_id` for backwards compat with old clients,
+    # but the canonical name is `pipeline_id`.
+    pipeline_id = data.get("pipeline_id") or data.get("pyspark_app_id")
+    if not pipeline_id:
+        raise ValidationError("pipeline_id is required")
+
     from app.domains.orchestration.application.unified_job_service import UnifiedJobService
-    
+
     service = UnifiedJobService(tenant_id)
     try:
         job_config = service.create_job(
-            pyspark_app_id=pyspark_app_id,
+            pipeline_id=pipeline_id,
             schedule=data.get("schedule"),
-            spark_config=data.get("spark_config"),
             name=data.get("name"),
             description=data.get("description"),
             notifications=data.get("notifications"),
@@ -121,16 +122,16 @@ def create_job():
     except Exception as e:
         logger.error(f"Failed to create job: {e}", exc_info=True)
         raise
-    
-    logger.info(f"Created Dagster job for PySpark app {pyspark_app_id}")
-    
+
+    logger.info(f"Created Dagster job for dlt pipeline {pipeline_id}")
+
     AuditService.log(
         action='job.created',
         resource_type='dagster_job',
         resource_id=str(job_config['id']),
         resource_name=job_config.get('dag_id', job_config.get('name', '')),
         tenant_id=tenant_id,
-        extra_data={'pyspark_app_id': pyspark_app_id},
+        extra_data={'pipeline_id': pipeline_id},
     )
     
     return jsonify({"job": job_config}), 201
@@ -142,46 +143,45 @@ def create_job():
 @require_roles(["data_engineer", "tenant_admin"])
 def create_pipeline_job():
     """
-    Create a Dagster job that runs multiple PySpark apps.
-    
+    Create a Dagster job that runs multiple dlt pipelines.
+
     Request Body:
-        - pyspark_app_ids: List of PySpark app UUIDs to run (required)
+        - pipeline_ids: List of dlt pipeline UUIDs to run (required)
         - name: Pipeline name (required)
         - description: Pipeline description
         - schedule: Cron expression or preset
-        - parallel: Run apps in parallel (default: false)
-        - spark_config: Optional Spark configuration overrides
-        
+        - parallel: Run pipelines in parallel (default: false)
+
     Returns:
         Created pipeline job configuration
     """
     identity = get_current_identity()
     tenant_id = identity.tenant_id
     user_id = identity.user_id
-    
+
     data = request.get_json()
     if not data:
         raise ValidationError("Request body required")
-    
-    pyspark_app_ids = data.get("pyspark_app_ids")
+
+    # Accept legacy `pyspark_app_ids` for backwards compat with old clients.
+    pipeline_ids = data.get("pipeline_ids") or data.get("pyspark_app_ids")
     name = data.get("name")
-    
-    if not pyspark_app_ids or not isinstance(pyspark_app_ids, list):
-        raise ValidationError("pyspark_app_ids must be a list of UUIDs")
+
+    if not pipeline_ids or not isinstance(pipeline_ids, list):
+        raise ValidationError("pipeline_ids must be a list of UUIDs")
     if not name:
         raise ValidationError("name is required")
-    
+
     from app.domains.orchestration.application.unified_job_service import UnifiedJobService
-    
+
     service = UnifiedJobService(tenant_id)
     try:
         job_config = service.create_pipeline_job(
-            pyspark_app_ids=pyspark_app_ids,
+            pipeline_ids=pipeline_ids,
             name=name,
             description=data.get("description"),
             schedule=data.get("schedule"),
             parallel=data.get("parallel", False),
-            spark_config=data.get("spark_config"),
             created_by=user_id,
         )
     except ValueError as e:
@@ -189,18 +189,94 @@ def create_pipeline_job():
     except Exception as e:
         logger.error(f"Failed to create pipeline job: {e}", exc_info=True)
         raise
-    
-    logger.info(f"Created pipeline job '{name}' with {len(pyspark_app_ids)} apps")
-    
+
+    logger.info(f"Created pipeline job '{name}' with {len(pipeline_ids)} pipelines")
+
     AuditService.log(
         action='pipeline.created',
         resource_type='dagster_pipeline',
         resource_id=str(job_config['id']),
         resource_name=name,
         tenant_id=tenant_id,
-        extra_data={'app_count': len(pyspark_app_ids)},
+        extra_data={'pipeline_count': len(pipeline_ids)},
     )
     
+    return jsonify({"job": job_config}), 201
+
+
+@api_v1_bp.route("/jobs/dbt", methods=["POST"])
+@authenticated
+@tenant_required
+@require_roles(["data_engineer", "tenant_admin"])
+def create_dbt_job():
+    """
+    Create a Dagster job that runs dbt (run or test).
+
+    Request Body:
+        - kind: 'run' or 'test' (required)
+        - profile: 'default' | 'lake' | 'warehouse' (default: 'default')
+        - name: Optional custom job name
+        - description: Optional job description
+        - schedule: Cron expression or preset (@hourly, @daily, ...)
+        - select: Optional dbt --select expression (models or tests)
+        - tags: Optional list of dbt tag selectors (run only)
+        - full_refresh: Run with --full-refresh (run only, default: false)
+        - retries: Number of retries on failure (default: 2)
+        - retry_delay_minutes: Minutes between retries (default: 5)
+
+    Returns:
+        Created job configuration
+    """
+    identity = get_current_identity()
+    tenant_id = identity.tenant_id
+    user_id = identity.user_id
+
+    data = request.get_json()
+    if not data:
+        raise ValidationError("Request body required")
+
+    kind = (data.get("kind") or "").lower()
+    if kind not in ("run", "test"):
+        raise ValidationError("kind must be 'run' or 'test'")
+
+    profile = (data.get("profile") or "default").lower()
+    if profile not in ("default", "lake", "warehouse"):
+        raise ValidationError("profile must be one of: default, lake, warehouse")
+
+    from app.domains.orchestration.application.unified_job_service import UnifiedJobService
+
+    service = UnifiedJobService(tenant_id)
+    try:
+        job_config = service.create_dbt_job(
+            kind=kind,
+            profile=profile,
+            name=data.get("name"),
+            description=data.get("description"),
+            schedule=data.get("schedule"),
+            select=data.get("select"),
+            tags=data.get("tags"),
+            full_refresh=bool(data.get("full_refresh", False)),
+            retries=data.get("retries", 2),
+            retry_delay_minutes=data.get("retry_delay_minutes", 5),
+            created_by=user_id,
+        )
+    except ValueError as e:
+        raise ValidationError(str(e))
+    except Exception as e:
+        logger.error(f"Failed to create dbt job: {e}", exc_info=True)
+        raise
+
+    logger.info(f"Created dbt {kind} job '{job_config.get('dag_id')}' (profile={profile})")
+
+    AuditService.log(
+        action='job.created',
+        resource_type='dagster_job',
+        resource_id=str(job_config['id']),
+        resource_name=job_config.get('dag_id', ''),
+        tenant_id=tenant_id,
+        extra_data={'kind': f'dbt_{kind}', 'profile': profile},
+    )
+
     return jsonify({"job": job_config}), 201
 
 

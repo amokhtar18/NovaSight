@@ -4,9 +4,11 @@
 
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, LayoutDashboard, Calendar, User } from 'lucide-react'
+import { Plus, LayoutDashboard, Calendar, User, Star } from 'lucide-react'
 import { useDashboards, useCreateDashboard } from '../hooks/useDashboards'
+import { useFavoriteDashboards } from '../hooks/useFavoriteDashboards'
 import type { Dashboard } from '@/types/dashboard'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -25,6 +27,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 export function DashboardsListPage() {
   const navigate = useNavigate()
   const { data: dashboards, isLoading } = useDashboards()
+  const { isFavorite, toggleFavorite } = useFavoriteDashboards()
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   
   return (
@@ -60,8 +63,27 @@ export function DashboardsListPage() {
               <CardHeader>
                 <div className="flex items-start justify-between">
                   <LayoutDashboard className="h-8 w-8 text-primary" />
-                  <div className="text-xs text-muted-foreground">
-                    {dashboard.widgets.length} widgets
+                  <div className="flex items-center gap-2">
+                    <div className="text-xs text-muted-foreground">
+                      {dashboard.widgets.length} widgets
+                    </div>
+                    <button
+                      type="button"
+                      aria-label={isFavorite(dashboard.id) ? 'Unpin dashboard' : 'Pin dashboard'}
+                      aria-pressed={isFavorite(dashboard.id)}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        toggleFavorite(dashboard.id)
+                      }}
+                      className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                      <Star
+                        className={cn(
+                          'h-4 w-4',
+                          isFavorite(dashboard.id) && 'fill-yellow-400 text-yellow-400',
+                        )}
+                      />
+                    </button>
                   </div>
                 </div>
                 <CardTitle className="mt-2">{dashboard.name}</CardTitle>

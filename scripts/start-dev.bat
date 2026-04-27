@@ -7,7 +7,6 @@ REM
 REM Usage: scripts\start-dev.bat [options]
 REM
 REM Options:
-REM   --no-spark    Skip Spark cluster
 REM   --no-ollama   Skip Ollama LLM
 REM   --build       Force rebuild containers
 REM   --clean       Remove volumes and start fresh
@@ -19,14 +18,13 @@ echo NovaSight Development Environment
 echo ============================================
 
 REM Parse arguments
-set NO_SPARK=false
 set NO_OLLAMA=false
 set BUILD=false
 set CLEAN=false
 
 :parse_args
 if "%~1"=="" goto :end_parse
-if "%~1"=="--no-spark" set NO_SPARK=true
+if "%~1"=="--no-spark" rem (deprecated) Spark cluster removed; flag is a no-op
 if "%~1"=="--no-ollama" set NO_OLLAMA=true
 if "%~1"=="--build" set BUILD=true
 if "%~1"=="--clean" set CLEAN=true
@@ -71,11 +69,6 @@ docker compose up -d airflow-api-server airflow-dag-processor airflow-scheduler 
 REM Dagster is now integrated into the backend container
 echo Dagster is integrated into the backend service...
 
-if "%NO_SPARK%"=="false" (
-    echo Starting Spark cluster...
-    docker compose up -d spark-master spark-worker-1 spark-worker-2
-)
-
 if "%NO_OLLAMA%"=="false" (
     echo Starting Ollama LLM...
     docker compose up -d ollama
@@ -109,7 +102,6 @@ echo   Frontend:        http://localhost:5173
 echo   Backend API:     http://localhost:5000
 echo   Airflow UI:      http://localhost:8080  (airflow/airflow)
 echo   Dagster UI:      http://localhost:3000
-echo   Spark Master:    http://localhost:8081
 echo   ClickHouse:      http://localhost:8123
 echo   PostgreSQL:      localhost:5432
 echo   Redis:           localhost:6379

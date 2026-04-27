@@ -21,22 +21,25 @@ class ApiError extends Error {
 /**
  * Extract error message from Axios error response.
  */
-function extractErrorMessage(error: AxiosError): string {
-  if (error.response?.data) {
-    const data = error.response.data as Record<string, unknown>
+export function extractErrorMessage(error: unknown): string {
+  const axErr = error as AxiosError
+  if (axErr?.response?.data) {
+    const data = axErr.response.data as Record<string, unknown>
     // Try common error response formats
     if (typeof data.message === 'string') return data.message
     if (typeof data.error === 'string') return data.error
     if (typeof data.detail === 'string') return data.detail
     if (Array.isArray(data.errors) && data.errors.length > 0) {
-      return data.errors.map((e) => (typeof e === 'string' ? e : e.message || e.msg)).join(', ')
+      return data.errors
+        .map((e) => (typeof e === 'string' ? e : (e as { message?: string; msg?: string }).message || (e as { msg?: string }).msg))
+        .join(', ')
     }
     // Fallback to stringifying the response
     if (Object.keys(data).length > 0) {
       return JSON.stringify(data)
     }
   }
-  return error.message || 'An unexpected error occurred'
+  return axErr?.message || 'An unexpected error occurred'
 }
 
 class ApiClient {

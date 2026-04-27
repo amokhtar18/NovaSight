@@ -123,12 +123,8 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
         schema_name: Optional[str] = None,
         extra_params: Optional[Dict[str, Any]] = None,
         created_by: str = None,
-        # File-based source params
-        upload_token: Optional[str] = None,
     ) -> DataConnection:
-        """Create a new data connection (database or file-based)."""
-        from app.domains.datasources.application.connection_validators import is_file_based
-
+        """Create a new database connection."""
         # Check for duplicate name within tenant
         existing = DataConnection.query.filter(
             DataConnection.tenant_id == self.tenant_id,
@@ -143,29 +139,19 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
         except ValueError:
             raise ValueError(f"Invalid database type: {db_type}")
 
-        # Branch: file-based vs database
-        if is_file_based(db_type):
-            connection = self._create_file_connection(
-                name=name,
-                db_type_enum=db_type_enum,
-                upload_token=upload_token,
-                extra_params=extra_params or {},
-                created_by=created_by,
-            )
-        else:
-            connection = self._create_database_connection(
-                name=name,
-                db_type_enum=db_type_enum,
-                host=host,
-                port=port,
-                database=database,
-                username=username,
-                password=password,
-                ssl_mode=ssl_mode,
-                schema_name=schema_name,
-                extra_params=extra_params or {},
-                created_by=created_by,
-            )
+        connection = self._create_database_connection(
+            name=name,
+            db_type_enum=db_type_enum,
+            host=host,
+            port=port,
+            database=database,
+            username=username,
+            password=password,
+            ssl_mode=ssl_mode,
+            schema_name=schema_name,
+            extra_params=extra_params or {},
+            created_by=created_by,
+        )
 
         db.session.add(connection)
         db.session.commit()
@@ -207,142 +193,13 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
             created_by=created_by,
         )
 
-    def _create_file_connection(
-        self,
-        name: str,
-        db_type_enum,
-        upload_token: Optional[str],
-        extra_params: Dict[str, Any],
-        created_by: str,
-    ) -> DataConnection:
-        """Create a file-based connection from a validated upload token."""
-        import hashlib
-        import hmac
-        import time
-        from flask import current_app
-
-        if not upload_token:
-            raise ValueError("upload_token is required for file-based sources")
-
-        # Verify and consume upload token
-        parts = upload_token.split("|")
-        if len(parts) != 5:
-            raise ValueError("Invalid upload_token format")
-
-        token_tenant, file_ref, token_db_type, expires_str, token_sig = parts
-
-        # Tenant check
-        if token_tenant != str(self.tenant_id):
-            raise ValueError("Upload token belongs to a different tenant")
-
-        # db_type check
-        if token_db_type != db_type_enum.value:
-            raise ValueError(
-                f"Upload token db_type '{token_db_type}' does not match "
-                f"requested db_type '{db_type_enum.value}'"
-            )
-
-        # Expiry check
-        try:
-            expires_at = int(expires_str)
-        except ValueError:
-            raise ValueError("Invalid upload_token: bad expiry")
-        if time.time() > expires_at:
-            raise ValueError("Upload token has expired")
-
-        # HMAC verification
-        secret_key = current_app.config.get("SECRET_KEY", "")
-        expected_payload = f"{token_tenant}|{file_ref}|{token_db_type}|{expires_str}"
-        expected_sig = hmac.new(
-            secret_key.encode(),
-            expected_payload.encode(),
-            hashlib.sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(token_sig, expected_sig):
-            raise ValueError("Invalid upload_token: signature mismatch")
-
-        # Build extra_params from token data + any caller-supplied overrides
-        merged_extra = {
-            "file_ref": file_ref,
-            **extra_params,
-        }
-
-        return DataConnection(
-            tenant_id=self.tenant_id,
-            name=name,
-            db_type=db_type_enum,
-            # file-based sources have no host/port/database/credentials
-            host=None,
-            port=None,
-            database=None,
-            username=None,
-            password_encrypted=None,
-            ssl_mode=None,
-            extra_params=merged_extra,
-            status=ConnectionStatus.ACTIVE,
-            created_by=created_by,
-        )
-
-    def update_connection(
-        self,
-        connection_id: str,
-        **kwargs,
-    ) -> Optional[DataConnection]:
-        """Update connection details."""
-        connection = self.get_connection(connection_id)
-        if not connection:
-            return None
-
-        # Handle password update separately
-        if "password" in kwargs:
-            password = kwargs.pop("password")
-            if password:  # Only update if provided
-                connection.password_encrypted = self._encryption.encrypt(password)
-
-        # Update allowed fields
-        allowed_fields = [
-            "name", "host", "port", "database", "schema_name",
-            "username", "ssl_mode", "extra_params", "description",
-        ]
-
-        for field, value in kwargs.items():
-            if field not in allowed_fields:
-                continue
-            setattr(connection, field, value)
-
-        db.session.commit()
-        logger.info(f"Updated connection: {connection.name}")
-
-        return connection
-
-    def delete_connection(self, connection_id: str) -> bool:
-        """Delete a data connection."""
-        connection = self.get_connection(connection_id)
-        if not connection:
-            return False
-
-        # TODO: Check for dependent ingestion jobs
-
-        db.session.delete(connection)
-        db.session.commit()
-
-        logger.info(f"Deleted connection: {connection.name}")
-
-        return True
-
     def test_connection(self, connection_id: str) -> Dict[str, Any]:
         """Test an existing connection."""
-        from app.domains.datasources.application.connection_validators import is_file_based
-
         connection = self.get_connection(connection_id)
         if not connection:
             return {"success": False, "error": "Connection not found"}
 
-        # File-based sources: verify file still exists
-        if is_file_based(connection.db_type.value):
-            return self._test_file_connection(connection)
-
-        # Database sources: decrypt password and test
+        # Decrypt password and test
         password = self._encryption.decrypt(connection.password_encrypted)
         return self.test_connection_params(
             db_type=connection.db_type.value,
@@ -355,93 +212,6 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
             extra_params=connection.extra_params,
         )
 
-    def _test_file_connection(self, connection: DataConnection) -> Dict[str, Any]:
-        """Test a file-based connection by verifying file accessibility."""
-        from app.platform.infrastructure.file_storage import FileStorageService
-
-        file_ref = (connection.extra_params or {}).get("file_ref")
-        if not file_ref:
-            return {"success": False, "error": "No file_ref in connection metadata"}
-
-        storage = FileStorageService(str(connection.tenant_id))
-        file_path = storage.get_file_path(file_ref)
-        if file_path is None:
-            return {"success": False, "error": "File not found in storage"}
-
-        expected_hash = (connection.extra_params or {}).get("file_hash")
-        if expected_hash and not storage.verify_hash(file_ref, expected_hash):
-            return {"success": False, "error": "File integrity check failed"}
-
-        return {
-            "success": True,
-            "message": "File accessible and integrity verified",
-            "details": {
-                "file_ref": file_ref,
-                "file_name": (connection.extra_params or {}).get("file_name"),
-                "format": (connection.extra_params or {}).get("file_format"),
-            },
-        }
-
-    def test_connection_params(
-        self,
-        db_type: str,
-        host: str,
-        port: int,
-        database: str,
-        username: str,
-        password: str,
-        ssl_mode: Optional[str] = None,
-        extra_params: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Test connection parameters without saving."""
-        try:
-            config = ConnectionConfig(
-                host=host,
-                port=port,
-                database=database,
-                username=username,
-                password=password,
-                ssl_mode=ssl_mode,
-                ssl=bool(ssl_mode),
-                extra_params=extra_params or {},
-            )
-
-            connector = ConnectorRegistry.create_connector(db_type, config)
-
-            with connector:
-                connector.test_connection()
-                all_schemas = connector.get_schemas()
-                
-                # For connection test, just return all schemas without filtering
-                # Filtering empty schemas is too slow for databases with many schemas (e.g., Oracle)
-                # The schema selection step can handle this more efficiently
-                return {
-                    "success": True,
-                    "message": "Connection successful",
-                    "details": {
-                        "database": database,
-                        "schemas_count": len(all_schemas),
-                        "schemas": all_schemas[:50],  # Limit to first 50 schemas for performance
-                        "schemas_truncated": len(all_schemas) > 50,
-                    },
-                }
-
-        except ConnectorException as e:
-            logger.error(f"Connection test failed: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "message": "Connection test failed",
-            }
-        except Exception as e:
-            logger.error(f"Connection test failed: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "message": "Connection test failed",
-                "details": {"exception_type": type(e).__name__},
-            }
-
     def preview_data(
         self,
         connection_id: str,
@@ -449,13 +219,7 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
         schema: Optional[str] = None,
         limit: int = 100,
     ) -> Dict[str, Any]:
-        """Fetch preview rows from a file-based or database connection.
-
-        For file-based sources the ``table`` and ``schema`` parameters are
-        informational only; the file is always read from ``file_ref``.
-        """
-        from app.domains.datasources.application.connection_validators import is_file_based
-
+        """Fetch preview rows from a database connection."""
         connection = self.get_connection(connection_id)
         if not connection:
             return {"success": False, "error": "Connection not found"}
@@ -463,26 +227,20 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
         db_type = connection.db_type.value
 
         try:
-            if is_file_based(db_type):
-                config = ConnectionConfig(
-                    extra_params=connection.extra_params or {},
-                )
-                query_str = table or ""
-            else:
-                password = self._encryption.decrypt(connection.password_encrypted)
-                config = ConnectionConfig(
-                    host=connection.host,
-                    port=connection.port,
-                    database=connection.database,
-                    username=connection.username,
-                    password=password,
-                    ssl_mode=connection.ssl_mode,
-                    ssl=bool(connection.ssl_mode),
-                    schema=schema or connection.schema_name,
-                    extra_params=connection.extra_params or {},
-                )
-                schema_prefix = f'"{schema}".' if schema else ""
-                query_str = f'SELECT * FROM {schema_prefix}"{table}" LIMIT {int(limit)}'
+            password = self._encryption.decrypt(connection.password_encrypted)
+            config = ConnectionConfig(
+                host=connection.host,
+                port=connection.port,
+                database=connection.database,
+                username=connection.username,
+                password=password,
+                ssl_mode=connection.ssl_mode,
+                ssl=bool(connection.ssl_mode),
+                schema=schema or connection.schema_name,
+                extra_params=connection.extra_params or {},
+            )
+            schema_prefix = f'"{schema}".' if schema else ""
+            query_str = f'SELECT * FROM {schema_prefix}"{table}" LIMIT {int(limit)}'
 
             connector = ConnectorRegistry.create_connector(db_type, config)
             with connector:

@@ -2,16 +2,30 @@
  * NovaSight Job Builder Page
  * ===========================
  *
- * Page for creating/editing Dagster jobs that run dlt pipelines.
+ * Create / edit a Dagster job. The orchestrator schedules **only dlt
+ * pipelines and dbt runs / tests** — Spark / PySpark scheduling has been
+ * removed (see `app/domains/orchestration/domain/models.py::TaskType`).
+ *
+ * Job kinds:
+ *   - **dlt**       — run a single dlt pipeline
+ *   - **dbt_run**   — run dbt models (against the lake or warehouse profile)
+ *   - **dbt_test**  — run dbt tests
  */
 
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { jobService, CreateJobRequest, CreatePipelineRequest } from '@/services/jobService'
+import { jobService, CreateJobRequest, CreateDbtJobRequest } from '@/services/jobService'
 import { pipelineService } from '@/services/pipelineService'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -23,8 +37,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CronBuilder } from '@/components/ui/cron-builder'
 import { PageHeader } from '@/components/common'
@@ -36,15 +48,17 @@ import {
   Clock,
   Settings,
   Zap,
-  GitBranch,
+  Code2,
+  FlaskConical,
   Info,
   CheckCircle,
-  Cpu,
-  SlidersHorizontal,
 } from 'lucide-react'
 import { toast } from '@/components/ui/use-toast'
 
-// Schedule presets
+type JobKind = 'dlt' | 'dbt_run' | 'dbt_test'
+type DbtProfile = 'default' | 'lake' | 'warehouse'
+type ScheduleKind = 'manual' | 'preset' | 'cron'
+
 const schedulePresets = [
   { value: '@hourly', label: 'Hourly', description: 'Every hour' },
   { value: '@daily', label: 'Daily', description: 'Every day at midnight' },
@@ -52,42 +66,69 @@ const schedulePresets = [
   { value: '@monthly', label: 'Monthly', description: 'First day of each month' },
 ]
 
+const kindMeta: Record<JobKind, { label: string; description: string; icon: JSX.Element; accent: string }> = {
+  dlt: {
+    label: 'dlt pipeline',
+    description: 'Run a single dlt ingestion pipeline into the lake.',
+    icon: <Zap className="h-5 w-5 text-orange-600" />,
+    accent: 'border-orange-200 bg-orange-50',
+  },
+  dbt_run: {
+    label: 'dbt run',
+    description: 'Materialize dbt models on the lake or warehouse profile.',
+    icon: <Code2 className="h-5 w-5 text-blue-600" />,
+    accent: 'border-blue-200 bg-blue-50',
+  },
+  dbt_test: {
+    label: 'dbt test',
+    description: 'Run dbt tests against existing models.',
+    icon: <FlaskConical className="h-5 w-5 text-purple-600" />,
+    accent: 'border-purple-200 bg-purple-50',
+  },
+}
+
 export function JobBuilderPage() {
   const { jobId } = useParams()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const [searchParams] = useSearchParams()
   const isEditing = !!jobId
 
-  // Form state
-  const [jobType, setJobType] = useState<'spark' | 'pipeline'>('spark')
-  const [selectedAppId, setSelectedAppId] = useState<string>('')
-  const [selectedAppIds, setSelectedAppIds] = useState<string[]>([])
+  // Common state
+  const [jobKind, setJobKind] = useState<JobKind>('dlt')
   const [jobName, setJobName] = useState('')
   const [description, setDescription] = useState('')
-  const [scheduleType, setScheduleType] = useState<'manual' | 'preset' | 'cron'>('manual')
+  const [scheduleType, setScheduleType] = useState<ScheduleKind>('manual')
   const [schedulePreset, setSchedulePreset] = useState('@daily')
   const [cronExpression, setCronExpression] = useState('0 0 * * *')
-  const [parallel, setParallel] = useState(false)
   const [retries, setRetries] = useState(2)
-  const [retryDelay, _setRetryDelay] = useState(5) // TODO: Implement UI
-  const [notifyOnFailure, _setNotifyOnFailure] = useState(true) // TODO: Implement UI
-  const [notifyOnSuccess, _setNotifyOnSuccess] = useState(false) // TODO: Implement UI
-  const [notificationEmails, _setNotificationEmails] = useState('') // TODO: Implement UI
 
-  // Resource configuration (per-job Spark resource allocation)
-  const [driverMemory, setDriverMemory] = useState('2g')
-  const [executorMemory, setExecutorMemory] = useState('2g')
-  const [executorCores, setExecutorCores] = useState(2)
-  const [numExecutors, setNumExecutors] = useState(2)
-  const [additionalConfigs, setAdditionalConfigs] = useState('')
+  // dlt-specific
+  const [selectedPipelineId, setSelectedPipelineId] = useState<string>('')
+
+  // dbt-specific
+  const [dbtProfile, setDbtProfile] = useState<DbtProfile>('default')
+  const [dbtSelectExpression, setDbtSelectExpression] = useState<string>('')
+  const [dbtTags, setDbtTags] = useState<string>('')
+  const [dbtFullRefresh, setDbtFullRefresh] = useState(false)
 
   // Load dlt pipelines
-  const { data: appsData, isLoading: loadingApps } = useQuery({
+  const { data: pipelinesData, isLoading: loadingPipelines } = useQuery({
     queryKey: ['pipelines'],
     queryFn: () => pipelineService.list({ per_page: 100 }),
   })
+  const pipelines = pipelinesData?.items || []
 
-  const pysparkApps = appsData?.pipelines || []
+  // Pre-select pipeline from `?pipeline_id=...` query param when arriving
+  // from the Pipelines tab in the Scheduling page.
+  useEffect(() => {
+    if (isEditing) return
+    const fromUrl = searchParams.get('pipeline_id')
+    if (fromUrl && !selectedPipelineId) {
+      setSelectedPipelineId(fromUrl)
+      setJobKind('dlt')
+    }
+  }, [isEditing, searchParams, selectedPipelineId])
 
   // Load existing job if editing
   const { data: existingJob, isLoading: loadingJob } = useQuery({
@@ -98,42 +139,53 @@ export function JobBuilderPage() {
 
   // Populate form when editing
   useEffect(() => {
-    if (existingJob) {
-      setJobName(existingJob.dag_id)
-      setDescription(existingJob.description || '')
-      setJobType(existingJob.type)
-      setScheduleType(existingJob.schedule_type)
-      if (existingJob.schedule_preset) {
-        setSchedulePreset(existingJob.schedule_preset)
-      }
-      if (existingJob.schedule_cron) {
-        setCronExpression(existingJob.schedule_cron)
-      }
-      // Extract app IDs from tags
-      const appIds = existingJob.tags.filter(
-        (t) => t.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    if (!existingJob) return
+    setJobName(existingJob.dag_id)
+    setDescription(existingJob.description || '')
+    setScheduleType(existingJob.schedule_type)
+    if (existingJob.schedule_preset) setSchedulePreset(existingJob.schedule_preset)
+    if (existingJob.schedule_cron) setCronExpression(existingJob.schedule_cron)
+
+    // Map backend job type → form kind
+    if (existingJob.type === 'dbt') {
+      // Inspect tags for run vs test
+      const isTest = existingJob.tags.includes('dbt_test')
+      setJobKind(isTest ? 'dbt_test' : 'dbt_run')
+      const profileTag = existingJob.tags.find((t) =>
+        ['profile:lake', 'profile:warehouse', 'profile:default'].includes(t)
       )
-      if (existingJob.type === 'pipeline') {
-        setSelectedAppIds(appIds)
-      } else if (appIds.length > 0) {
-        setSelectedAppId(appIds[0])
+      if (profileTag) {
+        setDbtProfile(profileTag.split(':')[1] as DbtProfile)
       }
+    } else {
+      setJobKind('dlt')
+      const pipelineTag = existingJob.tags.find((t) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(t)
+      )
+      if (pipelineTag) setSelectedPipelineId(pipelineTag)
     }
   }, [existingJob])
 
-  // Auto-generate job name when app is selected
+  // Auto-generate dlt job name
   useEffect(() => {
-    if (!isEditing && selectedAppId && jobType === 'spark') {
-      const app = pysparkApps.find((a) => a.id === selectedAppId)
-      if (app) {
-        const safeName = app.name.toLowerCase().replace(/\s+/g, '_').replace(/-/g, '_')
-        setJobName(`spark_${safeName}`)
-        setDescription(`Spark job for ${app.name}: ${app.source_table} → ${app.target_table}`)
+    if (isEditing || jobKind !== 'dlt' || !selectedPipelineId) return
+    const p = pipelines.find((x) => x.id === selectedPipelineId)
+    if (p) {
+      const safe = p.name.toLowerCase().replace(/\s+/g, '_').replace(/-/g, '_')
+      setJobName(`dlt_${safe}`)
+      if (!description) {
+        setDescription(`dlt pipeline run for ${p.name}`)
       }
     }
-  }, [selectedAppId, pysparkApps, isEditing, jobType])
+  }, [selectedPipelineId, pipelines, isEditing, jobKind, description])
 
-  // Create/update mutation
+  // Auto-generate dbt job name
+  useEffect(() => {
+    if (isEditing || jobKind === 'dlt' || jobName) return
+    const verb = jobKind === 'dbt_test' ? 'test' : 'run'
+    setJobName(`dbt_${verb}_${dbtProfile}`)
+  }, [jobKind, dbtProfile, isEditing, jobName])
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const schedule =
@@ -143,57 +195,36 @@ export function JobBuilderPage() {
           ? schedulePreset
           : cronExpression
 
-      // Build per-job spark resource config
-      const additionalConfigsObj: Record<string, string> = {}
-      additionalConfigs.split('\n').forEach((line) => {
-        const [key, ...rest] = line.split('=')
-        if (key?.trim() && rest.length > 0) {
-          additionalConfigsObj[key.trim()] = rest.join('=').trim()
-        }
-      })
-      const sparkResourceConfig: Record<string, unknown> = {
-        driver_memory: driverMemory,
-        executor_memory: executorMemory,
-        executor_cores: executorCores,
-        num_executors: numExecutors,
-        ...(Object.keys(additionalConfigsObj).length > 0 && { additional_configs: additionalConfigsObj }),
-      }
-
-      if (jobType === 'spark') {
+      if (jobKind === 'dlt') {
         const data: CreateJobRequest = {
-          pyspark_app_id: selectedAppId,
+          pipeline_id: selectedPipelineId,
           name: jobName,
           description,
           schedule,
           retries,
-          retry_delay_minutes: retryDelay,
-          spark_config: sparkResourceConfig,
-          notifications: {
-            emails: notificationEmails.split(',').map((e) => e.trim()).filter(Boolean),
-            on_failure: notifyOnFailure,
-            on_success: notifyOnSuccess,
-          },
+          retry_delay_minutes: 5,
         }
-
-        if (isEditing) {
-          return jobService.update(jobId!, data)
-        }
-        return jobService.create(data)
-      } else {
-        const data: CreatePipelineRequest = {
-          pyspark_app_ids: selectedAppIds,
-          name: jobName,
-          description,
-          schedule,
-          parallel,
-          spark_config: sparkResourceConfig,
-        }
-
-        if (isEditing) {
-          return jobService.update(jobId!, data as any)
-        }
-        return jobService.createPipeline(data)
+        return isEditing ? jobService.update(jobId!, data) : jobService.create(data)
       }
+
+      // dbt_run / dbt_test
+      const data: CreateDbtJobRequest = {
+        kind: jobKind === 'dbt_test' ? 'test' : 'run',
+        profile: dbtProfile,
+        name: jobName,
+        description,
+        schedule,
+        retries,
+        retry_delay_minutes: 5,
+        select: dbtSelectExpression || undefined,
+        tags: dbtTags
+          ? dbtTags.split(',').map((t) => t.trim()).filter(Boolean)
+          : undefined,
+        full_refresh: dbtFullRefresh,
+      }
+      return isEditing
+        ? jobService.update(jobId!, data as unknown as Partial<CreateJobRequest>)
+        : jobService.createDbtJob(data)
     },
     onSuccess: (job) => {
       toast({
@@ -203,30 +234,23 @@ export function JobBuilderPage() {
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
       navigate('/app/jobs')
     },
-    onError: (err: Error) => {
-      toast({
-        title: 'Error',
-        description: err.message,
-        variant: 'destructive',
-      })
+    onError: (err: unknown) => {
+      const msg =
+        (err as { response?: { data?: { error?: { message?: string } } }; message?: string })
+          ?.response?.data?.error?.message ||
+        (err as Error)?.message ||
+        'Failed to save job'
+      toast({ title: 'Error', description: msg, variant: 'destructive' })
     },
   })
 
-  // Validation
-  const isValid = () => {
+  const isValid = (): boolean => {
     if (!jobName.trim()) return false
-    if (jobType === 'spark' && !selectedAppId) return false
-    if (jobType === 'pipeline' && selectedAppIds.length < 1) return false
+    if (jobKind === 'dlt' && !selectedPipelineId) return false
     return true
   }
 
-  const handleAppToggle = (appId: string) => {
-    setSelectedAppIds((prev) =>
-      prev.includes(appId) ? prev.filter((id) => id !== appId) : [...prev, appId]
-    )
-  }
-
-  if ((isEditing && loadingJob) || loadingApps) {
+  if ((isEditing && loadingJob) || loadingPipelines) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -237,12 +261,12 @@ export function JobBuilderPage() {
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       <PageHeader
-        icon={<Zap className="h-5 w-5" />}
-        title={isEditing ? 'Edit Job' : 'Create Spark Job'}
+        icon={kindMeta[jobKind].icon}
+        title={isEditing ? 'Edit Job' : 'Create Job'}
         description={
           isEditing
             ? 'Modify job configuration'
-            : 'Create a Dagster job that runs PySpark apps on remote Spark cluster'
+            : 'Schedule a dlt pipeline or dbt run/test on Dagster'
         }
         eyebrow={
           <button
@@ -256,149 +280,174 @@ export function JobBuilderPage() {
         }
       />
 
-      {/* Job Type Selection (only for new jobs) */}
+      {/* Job Kind */}
       {!isEditing && (
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Job Type</CardTitle>
-            <CardDescription>Choose whether to create a single job or a pipeline</CardDescription>
+            <CardDescription>
+              Choose what this job will execute. The orchestrator only schedules
+              dlt pipelines and dbt jobs.
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4">
-              <Card
-                className={`cursor-pointer transition-all ${
-                  jobType === 'spark'
-                    ? 'border-primary ring-2 ring-primary ring-offset-2'
-                    : 'hover:border-primary/50'
-                }`}
-                onClick={() => setJobType('spark')}
-              >
-                <CardContent className="p-4 flex items-start gap-3">
-                  <div className="p-2 bg-orange-100 rounded-lg">
-                    <Zap className="h-5 w-5 text-orange-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-medium">Single Spark Job</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Run one PySpark app on your Spark cluster
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card
-                className={`cursor-pointer transition-all ${
-                  jobType === 'pipeline'
-                    ? 'border-primary ring-2 ring-primary ring-offset-2'
-                    : 'hover:border-primary/50'
-                }`}
-                onClick={() => setJobType('pipeline')}
-              >
-                <CardContent className="p-4 flex items-start gap-3">
-                  <div className="p-2 bg-purple-100 rounded-lg">
-                    <GitBranch className="h-5 w-5 text-purple-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-medium">Pipeline</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Run multiple PySpark apps in sequence or parallel
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {(Object.keys(kindMeta) as JobKind[]).map((k) => {
+                const meta = kindMeta[k]
+                const selected = jobKind === k
+                return (
+                  <Card
+                    key={k}
+                    className={`cursor-pointer transition-all ${
+                      selected
+                        ? 'border-primary ring-2 ring-primary ring-offset-2'
+                        : 'hover:border-primary/50'
+                    }`}
+                    onClick={() => setJobKind(k)}
+                  >
+                    <CardContent className="p-4 flex items-start gap-3">
+                      <div className={`p-2 rounded-lg ${meta.accent}`}>{meta.icon}</div>
+                      <div>
+                        <h3 className="font-medium">{meta.label}</h3>
+                        <p className="text-sm text-muted-foreground">{meta.description}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )
+              })}
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* PySpark App Selection */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Database className="h-5 w-5" />
-            {jobType === 'spark' ? 'Select PySpark App' : 'Select PySpark Apps'}
-          </CardTitle>
-          <CardDescription>
-            {jobType === 'spark'
-              ? 'Choose the PySpark app to run'
-              : 'Select multiple apps to include in the pipeline'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {pysparkApps.length === 0 ? (
-            <div className="text-center py-8">
-              <Database className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground">No PySpark apps found</p>
-              <Button variant="link" onClick={() => navigate('/app/pyspark/new')}>
-                Create a PySpark App first
-              </Button>
-            </div>
-          ) : jobType === 'spark' ? (
-            <Select value={selectedAppId} onValueChange={setSelectedAppId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select a PySpark app" />
-              </SelectTrigger>
-              <SelectContent>
-                {pysparkApps.map((app) => (
-                  <SelectItem key={app.id} value={app.id}>
-                    <div className="flex flex-col">
-                      <span>{app.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {app.source_table} → {app.target_table}
-                      </span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {pysparkApps.map((app) => (
-                <div
-                  key={app.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    selectedAppIds.includes(app.id)
-                      ? 'border-primary bg-primary/5'
-                      : 'hover:bg-muted/50'
-                  }`}
-                  onClick={() => handleAppToggle(app.id)}
-                >
-                  <Checkbox
-                    checked={selectedAppIds.includes(app.id)}
-                    onCheckedChange={() => handleAppToggle(app.id)}
-                  />
-                  <div className="flex-1">
-                    <p className="font-medium">{app.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {app.source_table} → {app.target_table}
-                    </p>
-                  </div>
-                  {selectedAppIds.includes(app.id) && (
-                    <Badge variant="secondary">
-                      #{selectedAppIds.indexOf(app.id) + 1}
-                    </Badge>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {jobType === 'pipeline' && selectedAppIds.length > 0 && (
-            <div className="mt-4 flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Switch checked={parallel} onCheckedChange={setParallel} id="parallel" />
-                <Label htmlFor="parallel">Run in parallel</Label>
+      {/* dlt-specific */}
+      {jobKind === 'dlt' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Database className="h-5 w-5" />
+              Select dlt Pipeline
+            </CardTitle>
+            <CardDescription>Choose the pipeline this job will run.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {pipelines.length === 0 ? (
+              <div className="text-center py-8">
+                <Database className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">No dlt pipelines found</p>
+                <Button variant="link" onClick={() => navigate('/app/pipelines/new')}>
+                  Create a dlt pipeline first
+                </Button>
               </div>
-              <p className="text-sm text-muted-foreground">
-                {parallel
-                  ? 'Apps will run simultaneously'
-                  : 'Apps will run sequentially in selected order'}
+            ) : (
+              <Select value={selectedPipelineId} onValueChange={setSelectedPipelineId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a dlt pipeline" />
+                </SelectTrigger>
+                <SelectContent>
+                  {pipelines.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <div className="flex flex-col">
+                        <span>{p.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {p.source_table || p.iceberg_table_name || p.id}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* dbt-specific */}
+      {(jobKind === 'dbt_run' || jobKind === 'dbt_test') && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              {jobKind === 'dbt_test' ? (
+                <FlaskConical className="h-5 w-5" />
+              ) : (
+                <Code2 className="h-5 w-5" />
+              )}
+              {jobKind === 'dbt_test' ? 'dbt Test Configuration' : 'dbt Run Configuration'}
+            </CardTitle>
+            <CardDescription>
+              {jobKind === 'dbt_test'
+                ? 'Choose which tests to execute.'
+                : 'Choose which models to materialize and on which profile.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {jobKind === 'dbt_run' && (
+              <div className="space-y-2">
+                <Label htmlFor="dbtProfile">Profile</Label>
+                <Select
+                  value={dbtProfile}
+                  onValueChange={(v) => setDbtProfile(v as DbtProfile)}
+                >
+                  <SelectTrigger id="dbtProfile">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="default">Default</SelectItem>
+                    <SelectItem value="lake">Lake (DuckDB on Iceberg)</SelectItem>
+                    <SelectItem value="warehouse">Warehouse (ClickHouse)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="dbtSelect">
+                {jobKind === 'dbt_test' ? 'Test Selector' : 'Model Selector'} (optional)
+              </Label>
+              <Input
+                id="dbtSelect"
+                value={dbtSelectExpression}
+                onChange={(e) => setDbtSelectExpression(e.target.value)}
+                placeholder={
+                  jobKind === 'dbt_test'
+                    ? 'e.g. orders, source:raw.* (defaults to all)'
+                    : 'e.g. fct_orders+ (defaults to all models)'
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Passed to dbt as <code>--select</code>. Leave empty to run everything.
               </p>
             </div>
-          )}
-        </CardContent>
-      </Card>
 
-      {/* Job Configuration */}
+            {jobKind === 'dbt_run' && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="dbtTags">Tags (optional)</Label>
+                  <Input
+                    id="dbtTags"
+                    value={dbtTags}
+                    onChange={(e) => setDbtTags(e.target.value)}
+                    placeholder="hourly, marts (comma-separated)"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    If provided, takes precedence over the model selector.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="fullRefresh"
+                    checked={dbtFullRefresh}
+                    onCheckedChange={setDbtFullRefresh}
+                  />
+                  <Label htmlFor="fullRefresh">Full refresh</Label>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Job metadata */}
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
@@ -414,10 +463,10 @@ export function JobBuilderPage() {
                 id="jobName"
                 value={jobName}
                 onChange={(e) => setJobName(e.target.value)}
-                placeholder="spark_my_extraction"
+                placeholder="dlt_orders_hourly"
               />
               <p className="text-xs text-muted-foreground">
-                Use lowercase letters, numbers, and underscores
+                Use lowercase letters, numbers, and underscores.
               </p>
             </div>
             <div className="space-y-2">
@@ -445,7 +494,7 @@ export function JobBuilderPage() {
         </CardContent>
       </Card>
 
-      {/* Schedule Configuration */}
+      {/* Schedule */}
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
@@ -453,11 +502,11 @@ export function JobBuilderPage() {
             Schedule
           </CardTitle>
           <CardDescription>
-            Configure when this job should run automatically
+            Configure when this job should run automatically.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Tabs value={scheduleType} onValueChange={(v) => setScheduleType(v as any)}>
+          <Tabs value={scheduleType} onValueChange={(v) => setScheduleType(v as ScheduleKind)}>
             <TabsList className="grid grid-cols-3 w-full max-w-md">
               <TabsTrigger value="manual">Manual</TabsTrigger>
               <TabsTrigger value="preset">Preset</TabsTrigger>
@@ -467,7 +516,7 @@ export function JobBuilderPage() {
             <TabsContent value="manual" className="mt-4">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Info className="h-5 w-5" />
-                <p>This job will only run when triggered manually</p>
+                <p>This job will only run when triggered manually.</p>
               </div>
             </TabsContent>
 
@@ -499,96 +548,6 @@ export function JobBuilderPage() {
               <CronBuilder value={cronExpression} onChange={setCronExpression} />
             </TabsContent>
           </Tabs>
-        </CardContent>
-      </Card>
-
-      {/* Resource Configuration */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Cpu className="h-5 w-5" />
-            Resource Configuration
-          </CardTitle>
-          <CardDescription>
-            Configure Spark resource allocation for this job. These override the global defaults.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="driverMemory">Driver Memory</Label>
-              <Input
-                id="driverMemory"
-                value={driverMemory}
-                onChange={(e) => setDriverMemory(e.target.value)}
-                placeholder="2g"
-              />
-              <p className="text-xs text-muted-foreground">e.g. 1g, 2g, 4g, 512m</p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="executorMemory">Executor Memory</Label>
-              <Input
-                id="executorMemory"
-                value={executorMemory}
-                onChange={(e) => setExecutorMemory(e.target.value)}
-                placeholder="2g"
-              />
-              <p className="text-xs text-muted-foreground">e.g. 1g, 2g, 4g, 512m</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="executorCores">Executor Cores</Label>
-              <Input
-                id="executorCores"
-                type="number"
-                min={1}
-                max={32}
-                value={executorCores}
-                onChange={(e) => setExecutorCores(parseInt(e.target.value) || 1)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="numExecutors">Number of Executors</Label>
-              <Input
-                id="numExecutors"
-                type="number"
-                min={1}
-                max={100}
-                value={numExecutors}
-                onChange={(e) => setNumExecutors(parseInt(e.target.value) || 1)}
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Advanced Configuration */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <SlidersHorizontal className="h-5 w-5" />
-            Advanced Configuration
-          </CardTitle>
-          <CardDescription>
-            Additional Spark configuration properties (optional)
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label htmlFor="additionalConfigs">Additional Spark Configs</Label>
-            <Textarea
-              id="additionalConfigs"
-              value={additionalConfigs}
-              onChange={(e) => setAdditionalConfigs(e.target.value)}
-              placeholder={"spark.sql.shuffle.partitions=200\nspark.serializer=org.apache.spark.serializer.KryoSerializer"}
-              rows={4}
-              className="font-mono text-sm"
-            />
-            <p className="text-xs text-muted-foreground">
-              One config per line in key=value format. These are passed as --conf to spark-submit.
-            </p>
-          </div>
         </CardContent>
       </Card>
 

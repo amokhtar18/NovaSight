@@ -23,7 +23,6 @@ import {
   Layers,
   Plus,
   Database,
-  BarChart2,
   Play,
   RefreshCw,
   FileCode2,
@@ -32,20 +31,16 @@ import {
   FolderTree,
   Terminal,
   ShieldCheck,
-  Search,
-  TrendingUp,
 } from 'lucide-react'
 import { GlassCard, GlassCardContent } from '@/components/ui/glass-card'
 import { fadeVariants, staggerContainerVariants } from '@/lib/motion-variants'
 import {
   ModelCanvas,
   LineageViewer,
-  MCPQueryBuilder,
   ProjectViewer,
 } from '@/features/dbt-studio/components'
 import {
   useModels,
-  useMetrics,
   useServerStatus,
   useStartServer,
   useStopServer,
@@ -60,19 +55,19 @@ import { palette } from '@/lib/colors'
 import { VisualQueryBuilder } from '../components/sql-builder'
 import { TestConfigForm, FreshnessConfig, TestResultsTable } from '../components/test-builder'
 import { DbtCommandPanel, LogViewer, ExecutionHistory } from '../components/execution'
-import { SemanticModelForm, MetricDesigner } from '../components/semantic-layer'
 import { CodePreview, SchemaExplorer } from '../components/shared'
 import {
   useVisualModels,
   useCreateVisualModel,
 } from '../hooks/useVisualModels'
-import { useCodePreviewMutation } from '../hooks/useCodePreview'
+import { useCodePreviewFromPayloadMutation } from '../hooks/useCodePreview'
 import { useWarehouseColumns } from '../hooks/useWarehouseSchema'
 import type {
   VisualModelCreatePayload,
   WarehouseColumn,
 } from '../types/visualModel'
 import { useDataSources } from '@/features/datasources/hooks'
+import { extractErrorMessage as extractApiErrorMessage } from '@/services/apiClient'
 import {
   Select,
   SelectContent,
@@ -88,11 +83,15 @@ export function EnhancedDbtStudioPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { toast } = useToast()
-  const [activeTab, setActiveTab] = useState('models')
+  const [activeTab, setActiveTab] = useState('builder')
+  const [builderMode, setBuilderMode] = useState<'canvas' | 'sql'>('sql')
   const [logExecutionId, setLogExecutionId] = useState<string | undefined>()
   const [availableColumns, setAvailableColumns] = useState<WarehouseColumn[]>([])
   const [selectedSchema, setSelectedSchema] = useState<string>()
   const [selectedTable, setSelectedTable] = useState<string>()
+  // Bumping this key remounts the VisualQueryBuilder so its internal
+  // form state resets to blank fields (used by the "New Model" button).
+  const [builderResetKey, setBuilderResetKey] = useState(0)
   // Warehouse source binding — defaults to the tenant-managed ClickHouse
   // warehouse (which is the only valid dbt target per platform design).
   // Selecting an external connection does NOT repoint dbt at that DB;
@@ -103,7 +102,6 @@ export function EnhancedDbtStudioPage() {
 
   // Existing API hooks
   const { data: modelsData, refetch: refetchModels } = useModels()
-  const { data: metricsData } = useMetrics()
   const { data: serverStatus, isLoading: statusLoading } = useServerStatus()
   const startServerMutation = useStartServer()
   const stopServerMutation = useStopServer()
@@ -113,7 +111,7 @@ export function EnhancedDbtStudioPage() {
   // Visual builder hooks
   const { data: visualModels } = useVisualModels()
   const createVisualModel = useCreateVisualModel()
-  const codePreview = useCodePreviewMutation()
+  const codePreview = useCodePreviewFromPayloadMutation()
 
   // Warehouse column introspection — enabled when a table is selected
   const { data: fetchedColumns } = useWarehouseColumns(selectedSchema, selectedTable)
@@ -210,20 +208,44 @@ export function EnhancedDbtStudioPage() {
       try {
         await createVisualModel.mutateAsync(payload)
         toast({ title: 'Model created', description: `${payload.model_name} saved successfully` })
-      } catch {
-        toast({ title: 'Failed to save model', variant: 'destructive' })
+        // After a successful save, hop to the Project tab so the user can
+        // see the new model materialised in the dbt project tree.
+        setActiveTab('project')
+      } catch (err) {
+        toast({
+          title: 'Failed to save model',
+          description: extractApiErrorMessage(err),
+          variant: 'destructive',
+        })
       }
     },
     [createVisualModel, toast]
   )
 
+  // "New Model" → reset the builder to blank fields and switch to the
+  // Model Builder tab. We bump ``builderResetKey`` so VisualQueryBuilder
+  // (which seeds its state from ``initialValues`` only on mount) is fully
+  // remounted, and we also clear any auto-filled schema/table selection.
+  const handleNewModel = useCallback(() => {
+    setSelectedSchema(undefined)
+    setSelectedTable(undefined)
+    setAvailableColumns([])
+    setBuilderMode('sql')
+    setActiveTab('builder')
+    setBuilderResetKey((k) => k + 1)
+  }, [])
+
   const handleVisualPreview = useCallback(
     async (payload: VisualModelCreatePayload) => {
       try {
-        await codePreview.mutateAsync(payload.model_name || 'preview')
+        await codePreview.mutateAsync(payload)
         toast({ title: 'Code preview generated' })
-      } catch {
-        toast({ title: 'Preview failed', variant: 'destructive' })
+      } catch (err) {
+        toast({
+          title: 'Preview failed',
+          description: extractApiErrorMessage(err),
+          variant: 'destructive',
+        })
       }
     },
     [codePreview, toast]
@@ -250,12 +272,6 @@ export function EnhancedDbtStudioPage() {
       color: palette.primary[500],
     },
     {
-      label: 'Metrics',
-      value: metricsData?.metrics?.length || 0,
-      icon: BarChart2,
-      color: palette.accent[500],
-    },
-    {
       label: 'Sources',
       value: modelsData?.models?.filter((m: any) => m.resource_type === 'source').length || 0,
       icon: Database,
@@ -264,7 +280,7 @@ export function EnhancedDbtStudioPage() {
   ]
 
   return (
-    <div className="min-h-screen p-6 space-y-6">
+    <div className="min-h-screen w-full p-6 space-y-6 flex flex-col">
       {/* Header */}
       <motion.div
         variants={fadeVariants}
@@ -363,7 +379,7 @@ export function EnhancedDbtStudioPage() {
             dbt test
           </Button>
 
-          <Button onClick={() => navigate('/app/dbt-studio/new')}>
+          <Button onClick={handleNewModel}>
             <Plus className="h-4 w-4 mr-1" />
             New Model
           </Button>
@@ -399,7 +415,7 @@ export function EnhancedDbtStudioPage() {
         variants={staggerContainerVariants}
         initial="hidden"
         animate="visible"
-        className="grid grid-cols-4 gap-4"
+        className="grid grid-cols-1 sm:grid-cols-3 gap-4"
       >
         {stats.map((stat) => {
           const Icon = stat.icon
@@ -425,87 +441,125 @@ export function EnhancedDbtStudioPage() {
       </motion.div>
 
       {/* Main Content */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1">
-        <TabsList className="mb-4 flex-wrap">
-          <TabsTrigger value="models" className="flex items-center gap-1.5 text-xs">
-            <FileCode2 className="h-3.5 w-3.5" />
-            Canvas
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 w-full">
+        <TabsList
+          className="mb-6 grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 h-auto gap-1 rounded-xl border border-border/60 bg-gradient-to-br from-muted/40 via-muted/20 to-transparent p-1.5 shadow-sm backdrop-blur-sm"
+        >
+          <TabsTrigger
+            value="builder"
+            className="group flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all hover:bg-background/60 data-[state=active]:bg-gradient-to-br data-[state=active]:from-indigo-500 data-[state=active]:to-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-indigo-500/30"
+          >
+            <FileCode2 className="h-4 w-4" />
+            Model Builder
           </TabsTrigger>
-          <TabsTrigger value="builder" className="flex items-center gap-1.5 text-xs">
-            <Database className="h-3.5 w-3.5" />
-            SQL Builder
-          </TabsTrigger>
-          <TabsTrigger value="lineage" className="flex items-center gap-1.5 text-xs">
-            <GitBranch className="h-3.5 w-3.5" />
+          <TabsTrigger
+            value="lineage"
+            className="group flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all hover:bg-background/60 data-[state=active]:bg-gradient-to-br data-[state=active]:from-indigo-500 data-[state=active]:to-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-indigo-500/30"
+          >
+            <GitBranch className="h-4 w-4" />
             Lineage
           </TabsTrigger>
-          <TabsTrigger value="tests" className="flex items-center gap-1.5 text-xs">
-            <ShieldCheck className="h-3.5 w-3.5" />
+          <TabsTrigger
+            value="tests"
+            className="group flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all hover:bg-background/60 data-[state=active]:bg-gradient-to-br data-[state=active]:from-indigo-500 data-[state=active]:to-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-indigo-500/30"
+          >
+            <ShieldCheck className="h-4 w-4" />
             Tests
           </TabsTrigger>
-          <TabsTrigger value="execution" className="flex items-center gap-1.5 text-xs">
-            <Terminal className="h-3.5 w-3.5" />
+          <TabsTrigger
+            value="execution"
+            className="group flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all hover:bg-background/60 data-[state=active]:bg-gradient-to-br data-[state=active]:from-indigo-500 data-[state=active]:to-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-indigo-500/30"
+          >
+            <Terminal className="h-4 w-4" />
             Execution
           </TabsTrigger>
-          <TabsTrigger value="semantic" className="flex items-center gap-1.5 text-xs">
-            <TrendingUp className="h-3.5 w-3.5" />
-            Semantic
-          </TabsTrigger>
-          <TabsTrigger value="query" className="flex items-center gap-1.5 text-xs">
-            <BarChart2 className="h-3.5 w-3.5" />
-            Query
-          </TabsTrigger>
-          <TabsTrigger value="schema" className="flex items-center gap-1.5 text-xs">
-            <Search className="h-3.5 w-3.5" />
-            Schema
-          </TabsTrigger>
-          <TabsTrigger value="project" className="flex items-center gap-1.5 text-xs">
-            <FolderTree className="h-3.5 w-3.5" />
+          <TabsTrigger
+            value="project"
+            className="group flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all hover:bg-background/60 data-[state=active]:bg-gradient-to-br data-[state=active]:from-indigo-500 data-[state=active]:to-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-indigo-500/30"
+          >
+            <FolderTree className="h-4 w-4" />
             Project
           </TabsTrigger>
         </TabsList>
 
-        {/* ── Canvas (original Model Builder) ─────────────────────────── */}
-        <TabsContent value="models" className="h-[600px]">
-          <ModelCanvas
-            onSave={handleSaveModels}
-            onValidate={handleValidateModels}
-            onGenerateCode={(nodeId) => {
-              navigate(`/app/dbt-studio/models/${nodeId}`)
-            }}
-          />
-        </TabsContent>
-
-        {/* ── Visual SQL Builder ──────────────────────────────────────── */}
-        <TabsContent value="builder">
-          <div className="grid grid-cols-[1fr_360px] gap-4">
-            <div className="space-y-4">
-              <VisualQueryBuilder
-                availableColumns={availableColumns}
-                availableModels={
-                  (visualModels || []).map((m: any) => m.model_name)
-                }
-                selectedSourceSchema={selectedSchema}
-                selectedSourceTable={selectedTable}
-                onSave={handleVisualSave}
-                onPreview={handleVisualPreview}
-                isSaving={createVisualModel.isPending}
-              />
-              {codePreview.data && (
-                <CodePreview
-                  sql={codePreview.data.sql}
-                  yaml={codePreview.data.yaml}
-                  title="Generated dbt Code"
-                />
-              )}
-            </div>
-            <div>
-              <SchemaExplorer
-                onTableSelect={handleTableSelect}
-                maxHeight="700px"
-              />
+        {/* ── Model Builder (Canvas + SQL Builder) ────────────────────── */}
+        <TabsContent value="builder" className="space-y-4">
+          {/* Inner mode switch */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Build using:</span>
+            <div className="inline-flex rounded-md border bg-muted/30 p-0.5">
+              <Button
+                size="sm"
+                variant={builderMode === 'sql' ? 'default' : 'ghost'}
+                className="h-7 text-xs"
+                onClick={() => setBuilderMode('sql')}
+              >
+                <Database className="h-3.5 w-3.5 mr-1" />
+                SQL Builder
+              </Button>
+              <Button
+                size="sm"
+                variant={builderMode === 'canvas' ? 'default' : 'ghost'}
+                className="h-7 text-xs"
+                onClick={() => setBuilderMode('canvas')}
+              >
+                <FileCode2 className="h-3.5 w-3.5 mr-1" />
+                Canvas
+              </Button>
             </div>
           </div>
+
+          {builderMode === 'sql' ? (
+            <div className="grid grid-cols-[1fr_360px] gap-4">
+              <div className="space-y-4">
+                <VisualQueryBuilder
+                  key={builderResetKey}
+                  availableColumns={availableColumns}
+                  availableModels={
+                    (visualModels || []).map((m: any) => m.model_name)
+                  }
+                  selectedSourceSchema={selectedSchema}
+                  selectedSourceTable={selectedTable}
+                  onSchemaChange={setSelectedSchema}
+                  onTableChange={setSelectedTable}
+                  onSave={handleVisualSave}
+                  onPreview={handleVisualPreview}
+                  isSaving={createVisualModel.isPending}
+                />
+                {codePreview.data && (
+                  <CodePreview
+                    sql={codePreview.data.sql}
+                    yaml={codePreview.data.yaml}
+                    title="Generated dbt Code"
+                  />
+                )}
+              </div>
+              <div>
+                <SchemaExplorer
+                  onTableSelect={handleTableSelect}
+                  maxHeight="700px"
+                />
+              </div>
+          </div>
+          ) : (
+            <div className="grid grid-cols-[1fr_360px] gap-4">
+              <div className="h-[600px]">
+                <ModelCanvas
+                  onSave={handleSaveModels}
+                  onValidate={handleValidateModels}
+                  onGenerateCode={(nodeId) => {
+                    navigate(`/app/dbt-studio/models/${nodeId}`)
+                  }}
+                />
+              </div>
+              <div>
+                <SchemaExplorer
+                  onTableSelect={handleTableSelect}
+                  maxHeight="700px"
+                />
+              </div>
+            </div>
+          )}
         </TabsContent>
 
         {/* ── Lineage ─────────────────────────────────────────────────── */}
@@ -577,55 +631,7 @@ export function EnhancedDbtStudioPage() {
           </div>
         </TabsContent>
 
-        {/* ── Semantic Layer ──────────────────────────────────────────── */}
-        <TabsContent value="semantic">
-          <div className="grid grid-cols-2 gap-4">
-            <SemanticModelForm
-              availableModels={
-                (visualModels || []).map((m: any) => m.model_name)
-              }
-              onSave={(model) => {
-                toast({
-                  title: 'Semantic model saved',
-                  description: model.name,
-                })
-              }}
-            />
-            <MetricDesigner
-              onSave={(metric) => {
-                toast({
-                  title: 'Metric saved',
-                  description: metric.name,
-                })
-              }}
-            />
-          </div>
-        </TabsContent>
-
-        {/* ── Query Semantic Layer (original) ─────────────────────────── */}
-        <TabsContent value="query" className="h-[600px]">
-          <MCPQueryBuilder
-            onQueryExecuted={(result: any) => {
-              console.log('Query result:', result)
-            }}
-          />
-        </TabsContent>
-
-        {/* ── Schema Explorer ─────────────────────────────────────────── */}
-        <TabsContent value="schema">
-          <div className="max-w-2xl mx-auto">
-            <SchemaExplorer
-              onTableSelect={handleTableSelect}
-              onColumnClick={(schema, table, column) => {
-                toast({
-                  title: `${schema}.${table}.${column}`,
-                  description: 'Column selected',
-                })
-              }}
-              maxHeight="600px"
-            />
-          </div>
-        </TabsContent>
+        {/* ── Semantic / Query / Schema tabs intentionally hidden ─── */}
 
         {/* ── Project (original) ──────────────────────────────────────── */}
         <TabsContent value="project" className="min-h-[600px]">

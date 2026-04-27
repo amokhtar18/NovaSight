@@ -1,0 +1,169 @@
+
+# ============================================================================
+# NovaSight Generated dbt Schema: stg_terminations
+# Generated: 2026-04-27T13:09:02.594260
+# Template: dbt/schema.yml.j2 v1.0.0
+# WARNING: Auto-generated file - do not edit manually
+# ============================================================================
+
+version: 2
+
+models:
+  - name: stg_terminations
+
+
+
+
+    tags:
+
+      - hr
+
+
+
+    columns:
+
+      - name: id
+
+
+        data_type: String
+
+
+
+
+
+      - name: branch
+
+
+        data_type: String
+
+
+
+
+
+      - name: staff_id
+
+
+        data_type: String
+
+
+
+
+
+      - name: nid
+
+
+        data_type: String
+
+
+
+
+
+      - name: name
+
+
+        data_type: String
+
+
+
+
+
+      - name: department
+
+
+        data_type: String
+
+
+
+
+
+      - name: position
+
+
+        data_type: String
+
+
+
+
+
+      - name: nationality
+
+
+        data_type: String
+
+
+
+
+
+      - name: hire_date
+
+
+        data_type: String
+
+
+
+
+
+      - name: contract_start_date
+
+
+        data_type: String
+
+
+
+
+
+      - name: contract_end_date
+
+
+        data_type: String
+
+
+
+
+
+      - name: termination_reason
+
+
+        data_type: String
+
+
+
+
+
+      - name: termination_date
+
+
+        data_type: String
+
+
+
+
+
+      - name: entry_user
+
+
+        data_type: String
+
+
+
+
+
+      - name: created_at
+
+
+        data_type: String
+
+
+
+
+
+      - name: notes
+
+
+        data_type: String
+
+
+
+
+
+

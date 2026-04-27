@@ -10,13 +10,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
-    default-jdk \
     curl \
     && rm -rf /var/lib/apt/lists/*
-
-# Set JAVA_HOME for Spark
-ENV JAVA_HOME=/usr/lib/jvm/default-java
-ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 # Install Python dependencies
 COPY backend/requirements.txt .
@@ -29,7 +24,6 @@ RUN pip install --no-cache-dir \
     dagster-graphql>=1.9.0 \
     dagster-postgres>=0.25.0 \
     dagster-dbt>=0.25.0 \
-    dagster-pyspark>=0.25.0 \
     gql>=3.5.0
 
 # Copy application code
