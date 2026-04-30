@@ -31,7 +31,7 @@ import {
 import { SemanticModelsPage, ModelDetailPage } from '@/features/semantic'
 import { EnhancedDbtStudioPage, ModelDetailPage as DbtModelDetailPage } from '@/features/dbt-studio'
 import { DashboardsListPage, DashboardBuilderPage } from '@/features/dashboards'
-import { QueryPage } from '@/features/query'
+import { AIWorkbenchPage } from '@/features/query'
 import { SqlEditorPage } from '@/features/sql-editor'
 import { ChartsListPage, ChartBuilderPage, ChartViewPage } from '@/pages/charts'
 import { DocumentationPage } from '@/pages/documentation'
@@ -141,7 +141,7 @@ function App() {
             <Route path="charts/:chartId/edit" element={<ChartBuilderPage />} />
             
             {/* AI Query Interface */}
-            <Route path="query" element={<QueryPage />} />
+            <Route path="query" element={<AIWorkbenchPage />} />
             
             {/* SQL Editor */}
             <Route path="sql" element={<SqlEditorPage />} />

@@ -59,7 +59,12 @@ def create_app(config_name: str = None) -> Flask:
     
     # Auto-seed default users on first startup (dev/demo)
     _auto_seed(app)
-    
+
+    # Optional Superset integration — register tenant lifecycle hooks
+    # so that creating a tenant automatically provisions its Superset
+    # database row pointing at the tenant's ClickHouse DB.
+    _register_superset_lifecycle(app)
+
     logger.info(f"NovaSight API initialized in {config_name} mode")
     
     return app
@@ -176,3 +181,20 @@ def _auto_seed(app: Flask) -> None:
         except Exception as exc:
             # Never crash the app because seeding failed
             logger.warning("Auto-seed skipped due to error: %s", exc)
+
+
+def _register_superset_lifecycle(app: Flask) -> None:
+    """
+    Register Superset provisioning hooks on the Tenant model when the
+    integration is enabled. Idempotent and safe to call repeatedly.
+    """
+    try:
+        from app.domains.analytics.superset import is_enabled
+        if not is_enabled():
+            return
+        from app.domains.analytics.superset.lifecycle import register
+        register()
+    except Exception as exc:  # noqa: BLE001 — never crash app boot
+        logger.warning(
+            "Superset lifecycle hook registration skipped: %s", exc
+        )

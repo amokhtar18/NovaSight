@@ -41,6 +41,9 @@ from app.domains.ingestion.api.dlt_uploads import dlt_uploads_bp  # noqa: F401
 
 # AI domain routes (canonical)
 from app.domains.ai.api import assistant_routes  # noqa: F401
+from app.domains.ai.api import agent_config_routes  # noqa: F401
+from app.domains.ai.api import mcp_routes  # noqa: F401
+from app.domains.ai.api import ollama_config_routes  # noqa: F401
 
 # Other route modules
 from app.api.v1 import audit
@@ -59,3 +62,13 @@ api_v1_bp.register_blueprint(dagster_proxy_bp)
 # Register dlt pipeline routes (ingestion)
 api_v1_bp.register_blueprint(dlt_pipeline_bp)
 api_v1_bp.register_blueprint(dlt_uploads_bp)
+
+# Optional Apache Superset proxy — only registered when SUPERSET_ENABLED=true.
+# All Superset integration code is loaded lazily inside this guard so the
+# default backend build never imports Superset internals.
+from app.domains.analytics.superset import is_enabled as _superset_enabled  # noqa: E402
+if _superset_enabled():
+    from app.domains.analytics.superset.proxy_routes import (  # noqa: E402
+        superset_proxy_bp,
+    )
+    api_v1_bp.register_blueprint(superset_proxy_bp)
