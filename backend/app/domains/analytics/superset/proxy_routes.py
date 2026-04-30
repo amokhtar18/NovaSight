@@ -100,8 +100,7 @@ def proxy(subpath: str):
         return (
             jsonify(
                 {
-                    "error": "Superset upstream unavailable",
-                    "details": str(exc),
+                    "error": "Superset upstream unavailable; check server logs",
                 }
             ),
             502,

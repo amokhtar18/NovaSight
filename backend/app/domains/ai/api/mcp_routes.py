@@ -80,7 +80,8 @@ def create_mcp_server():
             enabled=payload.enabled,
         )
     except MCPServiceError as exc:
-        return jsonify({"error": str(exc)}), 400
+        logger.info("MCP register rejected: %s", exc)
+        return jsonify({"error": "Could not register MCP server"}), 400
     return jsonify(server.to_dict()), 201
 
 
@@ -105,7 +106,8 @@ def mcp_server_health(name: str):
     try:
         return jsonify(MCPService.health(identity.tenant_id, name)), 200
     except MCPServiceError as exc:
-        return jsonify({"error": str(exc)}), 404
+        logger.info("MCP health failed: %s", exc)
+        return jsonify({"error": "MCP server not found"}), 404
 
 
 @api_v1_bp.route("/ai/mcp/servers/<name>/refresh", methods=["POST"])
@@ -117,7 +119,8 @@ def mcp_server_refresh(name: str):
     try:
         tools = MCPService.refresh_tools(identity.tenant_id, name)
     except MCPServiceError as exc:
-        return jsonify({"error": str(exc)}), 404
+        logger.info("MCP refresh failed: %s", exc)
+        return jsonify({"error": "MCP server not found"}), 404
     return jsonify({"name": name, "tools": tools}), 200
 
 
@@ -139,5 +142,9 @@ def mcp_server_invoke(name: str):
             identity.tenant_id, name, payload.tool, payload.arguments
         )
     except MCPServiceError as exc:
-        return jsonify({"error": str(exc)}), 400
+        logger.info("MCP invoke rejected: %s", exc)
+        return (
+            jsonify({"error": "MCP invocation rejected"}),
+            400,
+        )
     return jsonify({"result": result}), 200

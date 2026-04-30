@@ -17,7 +17,16 @@ from app.extensions import db
 
 
 class MCPServiceError(RuntimeError):
-    """Raised on logical / validation errors in this service."""
+    """Raised on logical / validation errors in this service.
+
+    All error messages constructed here are author-controlled (no
+    upstream stack-trace data is propagated), so callers can safely
+    surface ``error.user_message`` to the client.
+    """
+
+    @property
+    def user_message(self) -> str:
+        return self.args[0] if self.args else "MCP service error"
 
 
 class MCPService:

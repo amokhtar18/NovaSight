@@ -125,5 +125,10 @@ async def pull_ollama_model():
             resp.raise_for_status()
     except httpx.HTTPError as exc:
         logger.warning("Ollama pull failed: %s", exc)
-        return jsonify({"error": str(exc)}), 502
+        return (
+            jsonify(
+                {"error": "Ollama upstream unavailable; check server logs"}
+            ),
+            502,
+        )
     return jsonify({"status": "ok", "model": payload.model}), 200
