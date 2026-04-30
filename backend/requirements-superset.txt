@@ -13,7 +13,10 @@
 # below to be importable.
 
 # Apache Superset — vendored as a pip dependency, NOT as a sibling repo.
-apache-superset==4.1.1
+# Pinned to 6.0.0 to address GHSA advisories affecting < 6.0.0
+# (PostgreSQL read-only bypass, low-privileged auth bypass) and < 4.1.2
+# (RLS SQL-injection bypass).
+apache-superset==6.0.0
 
 # ClickHouse SQLAlchemy dialect used by Superset to talk to each
 # tenant's ClickHouse database (the only allowed datasource).

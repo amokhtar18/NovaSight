@@ -139,7 +139,7 @@ services:
   # Start with:
   #   docker compose --profile superset up -d superset superset-mcp
   superset:
-    image: apache/superset:4.1.1
+    image: apache/superset:6.0.0
     container_name: novasight-superset
     restart: unless-stopped
     profiles: ["superset"]
