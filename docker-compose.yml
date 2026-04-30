@@ -129,6 +129,71 @@ services:
       - novasight-network
 
   # ============================================
+  # Apache Superset (OPTIONAL — profile: superset)
+  # ============================================
+  # Reuses the existing `postgres` (separate logical DB `superset`),
+  # the existing `redis` (db indices 2-5), and the per-tenant
+  # `clickhouse` databases (registered automatically by NovaSight's
+  # tenant lifecycle hook).
+  #
+  # Start with:
+  #   docker compose --profile superset up -d superset superset-mcp
+  superset:
+    image: apache/superset:4.1.1
+    container_name: novasight-superset
+    restart: unless-stopped
+    profiles: ["superset"]
+    ports:
+      - "8088:8088"
+    environment:
+      # Make NovaSight's superset_config.py importable (mounted under /app).
+      PYTHONPATH: /app
+      SUPERSET_CONFIG_PATH: /app/app/domains/analytics/superset/superset_config.py
+      # Shared infrastructure (re-uses existing services)
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: novasight
+      POSTGRES_PASSWORD: novasight
+      SUPERSET_DB_NAME: superset
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # Secrets
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-dev-superset-secret-change-me}
+      JWT_SECRET_KEY: jwt-dev-secret-key-change-in-production
+    volumes:
+      # Mount the NovaSight backend so superset_config.py + the bridge
+      # package are importable. Read-only because Superset must not
+      # mutate NovaSight code.
+      - ./backend:/app:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - novasight-network
+
+  # ============================================
+  # superset-mcp (Aptro) — MCP server in front of Superset
+  # ============================================
+  # Configured / health-checked from the AI Workbench UI at /app/query.
+  superset-mcp:
+    image: ghcr.io/aptro/superset-mcp:latest
+    container_name: novasight-superset-mcp
+    restart: unless-stopped
+    profiles: ["superset"]
+    ports:
+      - "8090:8080"
+    environment:
+      SUPERSET_BASE_URL: http://superset:8088
+      SUPERSET_USERNAME: ${SUPERSET_ADMIN_USERNAME:-admin}
+      SUPERSET_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:-admin}
+    depends_on:
+      - superset
+    networks:
+      - novasight-network
+
+  # ============================================
   # NovaSight Backend API (with Dagster)
   # ============================================
   backend:
@@ -172,6 +237,12 @@ services:
       S3_DEFAULT_REGION: us-east-1
       # Iceberg Catalog
       ICEBERG_CATALOG_URL: postgresql://novasight:novasight@postgres:5432/novasight_platform
+      # Superset integration (set SUPERSET_ENABLED=true to activate)
+      SUPERSET_ENABLED: ${SUPERSET_ENABLED:-false}
+      SUPERSET_BASE_URL: ${SUPERSET_BASE_URL:-http://superset:8088}
+      SUPERSET_ADMIN_USERNAME: ${SUPERSET_ADMIN_USERNAME:-admin}
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:-admin}
+      SUPERSET_MCP_URL: ${SUPERSET_MCP_URL:-http://superset-mcp:8080}
     volumes:
       - ./backend:/app
       - ./dbt:/app/dbt

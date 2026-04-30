@@ -5,6 +5,7 @@
 
 // Pages
 export { QueryPage } from './pages/QueryPage'
+export { AIWorkbenchPage } from './pages/AIWorkbenchPage'
 
 // Components
 export { QueryResult } from './components/QueryResult'
