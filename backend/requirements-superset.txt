@@ -1,0 +1,24 @@
+# NovaSight ↔ Apache Superset integration (OPTIONAL)
+# ====================================================
+# Install only when you want to run the Superset integration:
+#
+#     pip install -r requirements-superset.txt
+#
+# This file is intentionally separate from `requirements.txt` so the
+# main NovaSight backend builds stay lean and CI does not have to pull
+# Superset's large dependency tree by default.
+#
+# When `SUPERSET_ENABLED=true`, the Flask backend loads the
+# `app.domains.analytics.superset` package and expects the packages
+# below to be importable.
+
+# Apache Superset — vendored as a pip dependency, NOT as a sibling repo.
+apache-superset==4.1.1
+
+# ClickHouse SQLAlchemy dialect used by Superset to talk to each
+# tenant's ClickHouse database (the only allowed datasource).
+clickhouse-sqlalchemy==0.3.2
+
+# MCP client used by `analytics/superset/mcp_client.py` to invoke the
+# Aptro superset-mcp server from the AI Workbench.
+mcp>=1.0.0
