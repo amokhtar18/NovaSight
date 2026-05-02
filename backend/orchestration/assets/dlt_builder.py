@@ -253,120 +253,32 @@ def _build_pipeline_env(
 ) -> Dict[str, str]:
     """
     Build environment variables for pipeline execution.
-    
-    Injects tenant-specific S3 credentials and Iceberg catalog URL.
+
+    Wraps ``dlt_runner.build_pipeline_env`` (single source of truth) with a
+    Dagster-specific app-context push and warning log forwarding.
     """
-    import os
-    
-    # Start with current environment
-    env = os.environ.copy()
-    
-    # Add tenant context
-    env["TENANT_ID"] = tenant_id
-    env["TENANT_SLUG"] = tenant_slug
-    env["PIPELINE_ID"] = pipeline_id
-    
-    # Get tenant S3 config
-    try:
-        import sys
-        if '/app' not in sys.path:
-            sys.path.insert(0, '/app')
-        
-        from app import create_app
-        from app.domains.tenants.infrastructure.config_service import InfrastructureConfigService
-        
-        app = create_app()
-        with app.app_context():
-            service = InfrastructureConfigService()
-            configs = service.list_configs(
-                service_type="object_storage",
-                tenant_id=tenant_id,
-                include_global=False,
-                page=1,
-                per_page=1,
-            )
-            
-            if configs.get("items"):
-                settings = configs["items"][0].get("settings", {})
-                # Decrypt credentials
-                decrypted = service.decrypt_settings(settings, "object_storage")
-                
-                env["TENANT_S3_BUCKET"] = decrypted.get("bucket", "")
-                env["AWS_ACCESS_KEY_ID"] = decrypted.get("access_key", "")
-                env["AWS_SECRET_ACCESS_KEY"] = decrypted.get("secret_key", "")
-                env["S3_ENDPOINT_URL"] = decrypted.get("endpoint_url", "")
-                env["AWS_REGION"] = decrypted.get("region", "us-east-1")
-                
-    except Exception as e:
-        context.log.warning(f"Could not load S3 config: {e}")
-    
-    # Iceberg catalog URL
-    env["ICEBERG_CATALOG_URL"] = os.getenv(
-        "ICEBERG_CATALOG_URL",
-        "postgresql://novasight:novasight@postgres:5432/novasight_platform"
-    )
-    
-    # Get source connection string OR file-source env
-    try:
-        from app import create_app
-        from app.domains.ingestion.domain.models import DltPipeline, DltSourceKind
-        from app.domains.datasources.application.connection_service import ConnectionService
+    import sys
+    if "/app" not in sys.path:
+        sys.path.insert(0, "/app")
 
-        app = create_app()
-        with app.app_context():
-            pipeline = DltPipeline.query.get(pipeline_id)
-            if pipeline is None:
-                raise RuntimeError(f"Pipeline {pipeline_id} not found")
+    from app import create_app
+    from app.domains.ingestion.application.dlt_runner import build_pipeline_env
 
-            kind = pipeline.source_kind or DltSourceKind.SQL.value
-            if kind == DltSourceKind.FILE.value:
-                # File-source pipelines read directly from the tenant S3
-                # bucket; the env above already carries the S3 creds.
-                env["FILE_OBJECT_KEY"] = pipeline.file_object_key or ""
-                env["FILE_FORMAT"] = pipeline.file_format or ""
-                env["FILE_OPTIONS_JSON"] = json.dumps(pipeline.file_options or {})
-            elif pipeline.connection_id:
-                # SQL-source: inject the database connection string
-                conn_service = ConnectionService()
-                connection = conn_service.get_connection(str(pipeline.connection_id))
-                if connection:
-                    env["SOURCE_CONNECTION_STRING"] = conn_service.get_connection_string(
-                        str(pipeline.connection_id)
-                    )
-    except Exception as e:
-        context.log.warning(f"Could not load pipeline source env: {e}")
-    
-    return env
+    app = create_app()
+    with app.app_context():
+        return build_pipeline_env(
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            pipeline_id=pipeline_id,
+            log_fn=context.log.warning,
+        )
 
 
 def _parse_pipeline_metrics(stdout: str) -> Dict[str, Any]:
-    """
-    Parse metrics from pipeline stdout.
-    
-    Looks for lines like:
-    METRICS:rows=1000
-    METRICS:duration_ms=5000
-    METRICS:iceberg_snapshot_id=abc123
-    """
-    metrics = {}
-    
-    for line in stdout.split('\n'):
-        if line.startswith("METRICS:"):
-            try:
-                metric_part = line[8:]  # Remove "METRICS:"
-                key, value = metric_part.split('=', 1)
-                
-                # Try to convert to int
-                try:
-                    value = int(value)
-                except ValueError:
-                    pass
-                
-                metrics[key] = value
-            except Exception:
-                pass
-    
-    return metrics
+    """Delegate to ``dlt_runner.parse_pipeline_metrics`` (single source of truth)."""
+    from app.domains.ingestion.application.dlt_runner import parse_pipeline_metrics
+
+    return parse_pipeline_metrics(stdout)
 
 
 def _update_pipeline_stats(

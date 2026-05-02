@@ -160,5 +160,19 @@ echo "║           NovaSight Backend Ready! 🚀                 ║"
 echo "╚═══════════════════════════════════════════════════════╝"
 echo ""
 
+# ── dbt deps (idempotent, container-local install path) ──
+DBT_PROJECT_DIR="${DBT_PROJECT_DIR:-/app/dbt}"
+DBT_PROFILES_DIR="${DBT_PROFILES_DIR:-/app/dbt}"
+export DBT_PACKAGES_INSTALL_PATH="${DBT_PACKAGES_INSTALL_PATH:-/var/dbt_packages}"
+if [ -f "$DBT_PROJECT_DIR/packages.yml" ] && command -v dbt >/dev/null 2>&1; then
+    echo "📦 Installing dbt packages to $DBT_PACKAGES_INSTALL_PATH ..."
+    mkdir -p "$DBT_PACKAGES_INSTALL_PATH"
+    (
+        cd "$DBT_PROJECT_DIR" && \
+        dbt deps --project-dir "$DBT_PROJECT_DIR" --profiles-dir "$DBT_PROFILES_DIR" 2>&1 \
+            | tail -20
+    ) || echo "⚠️  dbt deps failed (non-fatal)."
+fi
+
 # ── 4. Start the application ──
 exec "$@"

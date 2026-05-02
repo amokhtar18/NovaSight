@@ -148,13 +148,18 @@ class TestingConfig(BaseConfig):
             "postgresql://novasight:novasight@localhost:5432/novasight_test"
         )
     )
-    
-    # Reduced pool for tests
-    SQLALCHEMY_ENGINE_OPTIONS = {
-        "pool_size": 5,
-        "pool_recycle": 3600,
-        "pool_pre_ping": True,
-    }
+
+    # Reduced pool for tests. SQLite (used in unit-only runs) does not
+    # support pooled connection options, so omit them when the URI is SQLite.
+    SQLALCHEMY_ENGINE_OPTIONS = (
+        {}
+        if SQLALCHEMY_DATABASE_URI.startswith("sqlite")
+        else {
+            "pool_size": 5,
+            "pool_recycle": 3600,
+            "pool_pre_ping": True,
+        }
+    )
     
     # Disable rate limiting in tests
     RATELIMIT_ENABLED = False

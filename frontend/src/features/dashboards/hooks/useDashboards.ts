@@ -1,15 +1,50 @@
 /**
- * Dashboard hooks for data fetching and mutations
+ * Dashboard hooks for data fetching and mutations.
+ *
+ * Internals: when the per-tenant `FEATURE_SUPERSET_BACKEND` flag is on,
+ * dashboard CRUD is transparently re-routed through Superset
+ * (Phase 5 of the Superset integration). The hook return shapes are
+ * unchanged so consumers (`pages/dashboards/*`) keep working.
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '@/lib/api'
+import {
+  isSupersetBackendEnabled,
+  supersetService,
+} from '@/services/supersetService'
 import type { Dashboard, Widget, WidgetData } from '@/types/dashboard'
+
+function supersetToNovaDashboard(raw: Record<string, unknown>): Dashboard {
+  return {
+    id: String(raw.id || ''),
+    name: String(raw.name || ''),
+    layout: (raw.layout as unknown[]) || [],
+    tags: (raw.tags as string[]) || [],
+    isPublic: Boolean(raw.is_public),
+    tenantId: (raw.tenant_id as string) || '',
+    createdAt: (raw.created_at as string) || '',
+    updatedAt: (raw.updated_at as string) || undefined,
+  } as unknown as Dashboard
+}
+
+function novaToSupersetDashboard(data: Partial<Dashboard>): Record<string, unknown> {
+  return {
+    name: (data as { name?: string }).name,
+    layout: (data as { layout?: unknown[] }).layout || [],
+    tags: (data as { tags?: string[] }).tags || [],
+    is_public: Boolean((data as { isPublic?: boolean }).isPublic),
+  }
+}
 
 export function useDashboards() {
   return useQuery({
     queryKey: ['dashboards'],
     queryFn: async () => {
+      if (await isSupersetBackendEnabled()) {
+        const { items } = await supersetService.listDashboards()
+        return (items as Record<string, unknown>[]).map(supersetToNovaDashboard)
+      }
       const response = await api.get<Dashboard[] | { dashboards: Dashboard[] }>('/dashboards')
       const data = response.data
       // Handle both array and object response formats
@@ -29,6 +64,10 @@ export function useDashboard(dashboardId: string | undefined) {
     queryKey: ['dashboard', dashboardId],
     queryFn: async () => {
       if (!dashboardId) throw new Error('Dashboard ID required')
+      if (await isSupersetBackendEnabled()) {
+        const raw = await supersetService.getDashboard(dashboardId)
+        return supersetToNovaDashboard(raw)
+      }
       const response = await api.get<Dashboard>(`/dashboards/${dashboardId}`)
       return response.data
     },
@@ -41,6 +80,10 @@ export function useCreateDashboard() {
   
   return useMutation({
     mutationFn: async (data: Partial<Dashboard>) => {
+      if (await isSupersetBackendEnabled()) {
+        const { id } = await supersetService.createDashboard(novaToSupersetDashboard(data))
+        return supersetToNovaDashboard(await supersetService.getDashboard(id))
+      }
       const response = await api.post<Dashboard>('/dashboards', data)
       return response.data
     },
@@ -55,6 +98,10 @@ export function useUpdateDashboard(dashboardId: string) {
   
   return useMutation({
     mutationFn: async (data: Partial<Dashboard>) => {
+      if (await isSupersetBackendEnabled()) {
+        await supersetService.updateDashboard(dashboardId, novaToSupersetDashboard(data))
+        return supersetToNovaDashboard(await supersetService.getDashboard(dashboardId))
+      }
       const response = await api.put<Dashboard>(`/dashboards/${dashboardId}`, data)
       return response.data
     },
@@ -70,6 +117,10 @@ export function useDeleteDashboard() {
   
   return useMutation({
     mutationFn: async (dashboardId: string) => {
+      if (await isSupersetBackendEnabled()) {
+        await supersetService.deleteDashboard(dashboardId)
+        return
+      }
       await api.delete(`/dashboards/${dashboardId}`)
     },
     onSuccess: () => {
@@ -83,6 +134,10 @@ export function useUpdateDashboardLayout(dashboardId: string) {
   
   return useMutation({
     mutationFn: async (layout: any[]) => {
+      if (await isSupersetBackendEnabled()) {
+        await supersetService.updateDashboard(dashboardId, { layout })
+        return { layout }
+      }
       const response = await api.put(`/dashboards/${dashboardId}/layout`, { layout })
       return response.data
     },

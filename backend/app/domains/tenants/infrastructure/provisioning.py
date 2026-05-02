@@ -209,8 +209,14 @@ class ProvisioningService:
         return f"tenant_{re.sub(r'[^a-z0-9_]', '_', tenant.slug.lower())}"
 
     def get_tenant_bucket_name(self, tenant: "Tenant") -> str:
-        """Get the S3 bucket name for a tenant."""
-        return f"novasight-{re.sub(r'[^a-z0-9-]', '-', tenant.slug.lower())}"
+        """Get the S3 bucket name for a tenant.
+
+        Canonical convention is ``tenant-<slug>`` (matches the bucket created
+        by the upload route in ``dlt_uploads.py``). All other call sites must
+        agree with this name or the dlt pipeline will read from the wrong
+        bucket.
+        """
+        return f"tenant-{re.sub(r'[^a-z0-9-]', '-', tenant.slug.lower())}"
 
     def database_exists(self, tenant: "Tenant") -> bool:
         """Check if the tenant's ClickHouse database exists."""

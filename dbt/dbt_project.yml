@@ -11,6 +11,13 @@ seed-paths: ["seeds"]
 macro-paths: ["macros"]
 snapshot-paths: ["snapshots"]
 
+# Install dbt packages outside the bind-mounted project root.
+# The Windows bind-mount has FS-semantics that cause `dbt deps` to leave
+# only the most recently installed package on disk, which makes the dbt
+# project uncompilable inside the container. Using a container-local path
+# (set via env var, defaulting to /var/dbt_packages) avoids the mount.
+packages-install-path: "{{ env_var('DBT_PACKAGES_INSTALL_PATH', '/var/dbt_packages') }}"
+
 target-path: "target"
 clean-targets:
   - "target"

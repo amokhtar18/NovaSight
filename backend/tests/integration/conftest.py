@@ -25,6 +25,10 @@ except ImportError:
 # Set test environment before importing app
 os.environ["FLASK_ENV"] = "testing"
 os.environ["TESTING"] = "true"
+# Enable the Superset proxy blueprint so its routes are registered on the
+# session-scoped integration app. Individual tests still control the
+# per-tenant ``FEATURE_SUPERSET_BACKEND`` flag via ``monkeypatch``.
+os.environ.setdefault("SUPERSET_ENABLED", "true")
 
 from app import create_app
 from app.extensions import db

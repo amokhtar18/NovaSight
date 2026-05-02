@@ -2,9 +2,17 @@
  * NovaSight Chart Service
  * 
  * API client for chart management operations.
+ *
+ * Internals: when the per-tenant `FEATURE_SUPERSET_BACKEND` flag is
+ * on, CRUD calls are transparently re-routed through
+ * `supersetService` (Phase 4 of the Superset integration). The public
+ * function signatures are unchanged so consumers (`pages/charts/*`,
+ * `features/charts/*`, dashboards, SQL Editor) keep working without
+ * modification.
  */
 
 import { apiClient } from './apiClient';
+import { supersetService, isSupersetBackendEnabled } from './supersetService';
 import type {
   Chart,
   ChartFolder,
@@ -100,6 +108,51 @@ export interface SQLEditorSaveAsChartRequest {
 }
 
 // =============================================================================
+// Superset adapter (used when FEATURE_SUPERSET_BACKEND is on)
+// =============================================================================
+
+function novaToSuperset(payload: ChartCreateRequest | ChartUpdateRequest): Record<string, unknown> {
+  return {
+    name: (payload as ChartCreateRequest).name,
+    description: payload.description,
+    chart_type: payload.chart_type,
+    source_type: payload.source_type,
+    semantic_model_id: payload.semantic_model_id,
+    sql_query: payload.sql_query,
+    query_config: payload.query_config,
+    viz_config: payload.viz_config,
+    folder_id: payload.folder_id,
+    tags: payload.tags,
+    is_public: payload.is_public,
+  };
+}
+
+function supersetToNova(raw: Record<string, unknown>): Chart {
+  const queryConfig = (raw.query_config as ChartQueryConfig) || {
+    dimensions: [],
+    measures: [],
+  };
+  const vizConfig = (raw.viz_config as ChartVizConfig) || {};
+  return {
+    id: String(raw.id || ''),
+    name: String(raw.name || ''),
+    description: (raw.description as string) || undefined,
+    chartType: (raw.chart_type as ChartType) || 'table',
+    sourceType: (raw.source_type as ChartSourceType) || 'semantic_model',
+    semanticModelId: (raw.semantic_model_id as string) || undefined,
+    queryConfig,
+    vizConfig,
+    folderId: (raw.folder_id as string) || undefined,
+    tags: (raw.tags as string[]) || [],
+    isPublic: Boolean(raw.is_public),
+    createdBy: (raw.created_by as string) || '',
+    tenantId: (raw.tenant_id as string) || '',
+    createdAt: (raw.created_at as string) || '',
+    updatedAt: (raw.updated_at as string) || undefined,
+  };
+}
+
+// =============================================================================
 // Chart Service
 // =============================================================================
 
@@ -120,6 +173,17 @@ export const chartService = {
     page?: number;
     per_page?: number;
   }): Promise<ChartListResponse> {
+    if (await isSupersetBackendEnabled()) {
+      const { items, total } = await supersetService.listCharts();
+      const charts = (items as Record<string, unknown>[]).map(supersetToNova);
+      return {
+        items: charts,
+        total,
+        page: 1,
+        per_page: charts.length,
+        pages: 1,
+      };
+    }
     const response = await apiClient.get<ChartListResponse>(BASE_PATH, { params });
     return response.data;
   },
@@ -143,6 +207,10 @@ export const chartService = {
    * Get a single chart by ID.
    */
   async getById(id: string): Promise<Chart> {
+    if (await isSupersetBackendEnabled()) {
+      const raw = await supersetService.getChart(id);
+      return supersetToNova(raw);
+    }
     const response = await apiClient.get<Chart>(`${BASE_PATH}/${id}`);
     return response.data;
   },
@@ -151,6 +219,10 @@ export const chartService = {
    * Create a new chart.
    */
   async create(data: ChartCreateRequest): Promise<Chart> {
+    if (await isSupersetBackendEnabled()) {
+      const { id } = await supersetService.createChart(novaToSuperset(data));
+      return supersetToNova(await supersetService.getChart(id));
+    }
     const response = await apiClient.post<Chart>(BASE_PATH, data);
     return response.data;
   },
@@ -159,6 +231,10 @@ export const chartService = {
    * Update an existing chart.
    */
   async update(id: string, data: ChartUpdateRequest): Promise<Chart> {
+    if (await isSupersetBackendEnabled()) {
+      await supersetService.updateChart(id, novaToSuperset(data));
+      return supersetToNova(await supersetService.getChart(id));
+    }
     const response = await apiClient.put<Chart>(`${BASE_PATH}/${id}`, data);
     return response.data;
   },
@@ -167,6 +243,10 @@ export const chartService = {
    * Delete a chart.
    */
   async delete(id: string, hard: boolean = false): Promise<void> {
+    if (await isSupersetBackendEnabled()) {
+      await supersetService.deleteChart(id);
+      return;
+    }
     await apiClient.delete(`${BASE_PATH}/${id}`, { params: { hard } });
   },
 

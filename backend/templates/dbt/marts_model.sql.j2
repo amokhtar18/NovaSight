@@ -55,7 +55,7 @@ WARNING: Auto-generated file - do not edit manually
 {% if cluster_by is defined and cluster_by | length > 0 %}
     cluster_by={{ cluster_by | tojson }}
 {% endif %}
-    tags=['marts', '{{ model_name | split('_') | first }}']
+    tags=['marts', '{{ (model_name.split('_')[0]) if '_' in model_name else model_name }}']
   )
 {% raw %}}}{% endraw %}
 

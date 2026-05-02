@@ -91,9 +91,30 @@ def _uri_targets_database(uri: str, expected_db: str) -> bool:
         # Some clickhouse URIs include the database as a query param.
         if not actual:
             actual = parsed.query.split("database=")[-1].split("&")[0]
+        # Strip a trailing /? cleanly (Superset sometimes appends one).
+        actual = actual.rstrip("/?")
         return actual == expected_db
     except Exception:  # pragma: no cover — defensive
         return False
+
+
+def _uri_targets_allowed_host(uri: str) -> bool:
+    """
+    Reject URIs whose hostname is not the configured ClickHouse host.
+
+    The allowed host comes from ``CLICKHOUSE_HOST``. When the env var
+    is not set we accept any host (development / test mode).
+    """
+    import os as _os
+
+    allowed = _os.getenv("CLICKHOUSE_HOST")
+    if not allowed:
+        return True
+    try:
+        host = (urlparse(str(uri)).hostname or "").strip().lower()
+    except Exception:  # pragma: no cover — defensive
+        return False
+    return host == allowed.strip().lower()
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +149,11 @@ def db_connection_mutator(
         raise PermissionError(
             f"Cross-tenant database access denied for user "
             f"{username!r}: expected '{expected_db}', got URI {uri!r}"
+        )
+
+    if not _uri_targets_allowed_host(str(uri)):
+        raise PermissionError(
+            f"Disallowed ClickHouse host in URI for user {username!r}"
         )
 
     return uri, params

@@ -482,14 +482,49 @@ class DltPipelineService:
                 f"{pipeline.status.value}). Activate the pipeline first."
             )
 
-        # TODO: Integration with Dagster in Phase 3 (Prompt 072)
-        # For now, return a placeholder response
+        # Resolve tenant slug for script path lookup
+        from app.domains.tenants.domain.models import Tenant
+        tenant = Tenant.query.get(pipeline.tenant_id)
+        if tenant is None:
+            raise DltPipelineServiceError(f"Tenant {pipeline.tenant_id} not found")
+
+        # Mark pipeline as running so the UI can show progress immediately
+        pipeline.last_run_at = datetime.utcnow()
+        pipeline.last_run_status = "running"
+        db.session.commit()
+
+        # Execute the generated script in a subprocess
+        from app.domains.ingestion.application.dlt_runner import execute_pipeline_script
+        timeout = int(os.getenv("DLT_RUN_TIMEOUT", "3600"))
+        result = execute_pipeline_script(
+            pipeline_id=str(pipeline.id),
+            tenant_id=str(pipeline.tenant_id),
+            tenant_slug=tenant.slug,
+            pipeline_name=pipeline.name,
+            timeout_seconds=timeout,
+            logger=logger,
+        )
+
+        # Persist final run stats (also transitions status to ERROR on failure)
+        self.update_run_stats(
+            pipeline_id=pipeline.id,
+            status=result["status"],
+            rows=result.get("rows"),
+            duration_ms=result.get("duration_ms"),
+            iceberg_snapshot_id=result.get("iceberg_snapshot_id"),
+        )
 
         return {
-            "pipeline_id": str(pipeline_id),
+            "pipeline_id": str(pipeline.id),
             "run_id": None,
-            "status": "pending",
-            "message": "Run trigger will be implemented in Phase 3 (Dagster integration)",
+            "status": result["status"],
+            "rows": result.get("rows"),
+            "duration_ms": result.get("duration_ms"),
+            "iceberg_snapshot_id": result.get("iceberg_snapshot_id"),
+            "exit_code": result.get("exit_code"),
+            "stdout_tail": result.get("stdout_tail", ""),
+            "stderr_tail": result.get("stderr_tail", ""),
+            "script_path": result.get("script_path"),
         }
 
     def update_run_stats(
@@ -600,7 +635,7 @@ class DltPipelineService:
             "pipeline_name": pipeline_name,
             "generated_at": datetime.utcnow().isoformat(),
             # S3 / Iceberg config
-            "s3_bucket": s3_config.get("bucket", f"novasight-{tenant.slug}"),
+            "s3_bucket": s3_config.get("bucket", f"tenant-{tenant.slug}"),
             "s3_endpoint_url": s3_config.get("endpoint_url", ""),
             "s3_region": s3_config.get("region", "us-east-1"),
             "iceberg_catalog_url": os.getenv(

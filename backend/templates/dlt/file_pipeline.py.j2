@@ -55,6 +55,10 @@ PIPELINE_NAME = "{{ pipeline_name }}"
 PIPELINE_ID = "{{ pipeline_id }}"
 ICEBERG_NAMESPACE = "{{ iceberg_namespace }}"
 ICEBERG_TABLE = "{{ iceberg_table_name }}"
+# dlt's filesystem destination cannot use a dataset_name containing '.'
+# (it gets normalized, leaving load-package state in a path different from
+# bucket_url and breaking writes). Use the normalized form everywhere.
+DATASET_NAME = ICEBERG_NAMESPACE.replace(".", "_")
 WRITE_DISPOSITION = "{{ write_disposition }}"
 
 # File-source configuration (overridable via env)
@@ -213,17 +217,16 @@ def file_records() -> Iterator[List[Dict[str, Any]]]:
 
 
 def get_destination():
-    """Create the dlt destination for Iceberg on S3."""
+    """Create the dlt destination for the raw lake layer on S3."""
     destination = dlt.destinations.filesystem(
-        bucket_url=f"s3://{TENANT_S3_BUCKET}/iceberg/{ICEBERG_NAMESPACE}",
+        bucket_url=f"s3://{TENANT_S3_BUCKET}/lake/{DATASET_NAME}",
         credentials={
             "aws_access_key_id": S3_ACCESS_KEY,
             "aws_secret_access_key": S3_SECRET_KEY,
             "endpoint_url": S3_ENDPOINT_URL if S3_ENDPOINT_URL else None,
             "region_name": S3_REGION,
         },
-        layout="{table_name}",
-        destination_name="iceberg",
+        layout="{table_name}/{load_id}.{file_id}.{ext}",
     )
     return destination
 
@@ -242,7 +245,7 @@ def run_pipeline() -> int:
         pipeline = dlt.pipeline(
             pipeline_name=PIPELINE_NAME,
             destination=get_destination(),
-            dataset_name=ICEBERG_NAMESPACE,
+            dataset_name=DATASET_NAME,
         )
 
         info = pipeline.run(file_records())
@@ -252,6 +255,46 @@ def run_pipeline() -> int:
         logger.info("Pipeline completed successfully")
         logger.info(f"Duration: {duration_ms}ms")
         logger.info(f"Load info: {info}")
+
+        # ------------------------------------------------------------------
+        # Optional: materialize the freshly-written JSONL load package as
+        # an Iceberg table. Gated on ENABLE_ICEBERG so the existing
+        # JSONL-on-S3 + ClickHouse-via-s3() path keeps working when the
+        # platform Postgres catalog is unreachable.
+        # ------------------------------------------------------------------
+        if os.environ.get("ENABLE_ICEBERG", "").lower() in ("1", "true", "yes"):
+            try:
+                from app.platform.lake.iceberg_writer import (
+                    materialize_jsonl_to_iceberg,
+                )
+
+                # dlt's filesystem destination writes to:
+                #   s3://{bucket}/lake/{DATASET_NAME}/{DATASET_NAME}/{table}/*.jsonl
+                # because the destination prepends ``dataset_name`` to the
+                # configured ``bucket_url`` path.
+                jsonl_glob = (
+                    f"s3://{TENANT_S3_BUCKET}/lake/{DATASET_NAME}/"
+                    f"{DATASET_NAME}/{ICEBERG_TABLE}/*.jsonl"
+                )
+                ice_result = materialize_jsonl_to_iceberg(
+                    tenant_id=TENANT_ID,
+                    namespace=ICEBERG_NAMESPACE,
+                    table_name=ICEBERG_TABLE,
+                    jsonl_glob=jsonl_glob,
+                    write_disposition=WRITE_DISPOSITION,
+                    s3_endpoint_url=S3_ENDPOINT_URL or None,
+                    s3_access_key=S3_ACCESS_KEY,
+                    s3_secret_key=S3_SECRET_KEY,
+                    s3_region=S3_REGION,
+                )
+                logger.info("Iceberg post-load: %s", ice_result)
+                print(f"METRICS:iceberg_snapshot_id={ice_result.get('snapshot_id')}")
+                print(f"METRICS:iceberg_rows={ice_result.get('rows')}")
+            except Exception as ice_err:  # noqa: BLE001
+                # Iceberg materialization is best-effort. Failing here
+                # would discard a successful dlt load — not desired.
+                logger.error("Iceberg post-load failed (non-fatal): %s", ice_err)
+                print(f"METRICS:iceberg_error={str(ice_err)[:300]}")
 
         rows = getattr(info, "rows_processed", 0) or 0
         print(f"METRICS:rows={rows}")

@@ -71,4 +71,8 @@ if _superset_enabled():
     from app.domains.analytics.superset.proxy_routes import (  # noqa: E402
         superset_proxy_bp,
     )
+    from app.domains.analytics.superset.sqllab_routes import (  # noqa: E402
+        sqllab_bp,
+    )
     api_v1_bp.register_blueprint(superset_proxy_bp)
+    api_v1_bp.register_blueprint(sqllab_bp)

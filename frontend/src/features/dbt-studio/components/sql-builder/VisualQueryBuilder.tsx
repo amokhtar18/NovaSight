@@ -22,7 +22,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { Database, Layers, Save, Eye, Code } from 'lucide-react'
+import { Database, Layers, Save, Eye, Code, GitBranch, X, Plus } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { SelectBuilder } from './SelectBuilder'
 import { JoinBuilder } from './JoinBuilder'
 import { WhereBuilder } from './WhereBuilder'
@@ -41,6 +42,37 @@ import type {
   WarehouseColumn,
 } from '../../types/visualModel'
 import type { Materialization } from '../../types'
+
+/**
+ * Convert a free-form identifier (e.g. "Revenue By Branch") to the
+ * snake_case form required by dbt and the backend Pydantic schema
+ * (`^[a-z][a-z0-9_]*$` for models, `^[a-z_][a-z0-9_]*$` for columns).
+ *
+ * - Trims, lowercases, replaces non-alphanumeric runs with `_`.
+ * - Collapses repeated `_` and trims leading/trailing `_`.
+ * - For models, prepends `m_` if the result starts with a digit so it
+ *   still satisfies the leading-letter constraint.
+ */
+function sanitizeIdentifier(
+  value: string,
+  kind: 'model' | 'column' = 'column',
+): string {
+  if (!value) return ''
+  // Insert underscore at lower→Upper boundaries so PascalCase becomes snake.
+  const snaked = value
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+  let safe = snaked
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+  if (!safe) return ''
+  if (kind === 'model' && /^[0-9]/.test(safe)) {
+    safe = `m_${safe}`
+  }
+  return safe
+}
 
 export interface VisualQueryBuilderProps {
   /** Available columns from ClickHouse for the selected source. */
@@ -87,6 +119,18 @@ export function VisualQueryBuilder({
   )
   const [sourceName, setSourceName] = useState(initialValues?.source_name || '')
   const [sourceTable, setSourceTable] = useState(initialValues?.source_table || '')
+  const [refs, setRefs] = useState<string[]>(initialValues?.refs || [])
+  const [refToAdd, setRefToAdd] = useState<string>('')
+  // 'table' = read from a ClickHouse schema or Iceberg namespace,
+  // 'ref'   = read from one or more upstream dbt models via ref().
+  // Default: staging models usually come from raw sources, intermediate /
+  // marts usually compose upstream refs.
+  const [sourceMode, setSourceMode] = useState<'table' | 'ref'>(() => {
+    if ((initialValues?.refs?.length ?? 0) > 0) return 'ref'
+    if (initialValues?.source_table) return 'table'
+    const initialLayer = (initialValues?.model_layer as string) || 'staging'
+    return initialLayer === 'staging' ? 'table' : 'ref'
+  })
   const [columns, setColumns] = useState<VisualColumnConfig[]>(
     (initialValues?.columns as VisualColumnConfig[]) || []
   )
@@ -213,25 +257,43 @@ export function VisualQueryBuilder({
             (t) => t.namespace === sourceName && t.table === sourceTable,
           )
         : undefined
+    // Sanitize identifiers up-front so the user never sees a backend
+    // VALIDATION_ERROR for casing/spaces. We also keep the user's
+    // original alias when present so the rendered SQL reads naturally.
+    const safeModelName = sanitizeIdentifier(modelName, 'model')
+    const safeColumns = columns.map((c) => ({
+      ...c,
+      name: sanitizeIdentifier(c.name, 'column') || c.name,
+    }))
+    const safeGroupBy = groupBy
+      .map((g) => sanitizeIdentifier(g, 'column'))
+      .filter(Boolean)
+    const useTable = sourceMode === 'table'
+    const joinRefs = joins.map((j) => j.source_model)
+    const allRefs = useTable
+      ? Array.from(new Set(joinRefs))
+      : Array.from(new Set([...refs, ...joinRefs]))
     return {
-      model_name: modelName,
+      model_name: safeModelName,
       model_layer: layer,
       description,
       materialization,
-      source_kind: sourceKind === 'lake' ? 'iceberg' : 'warehouse',
-      source_name: sourceName || undefined,
-      source_table: sourceTable || undefined,
+      source_kind: useTable && sourceKind === 'lake' ? 'iceberg' : 'warehouse',
+      source_name: useTable && sourceName ? sourceName : undefined,
+      source_table: useTable && sourceTable ? sourceTable : undefined,
       iceberg_s3_uri:
-        sourceKind === 'lake' ? lakeMatch?.s3_uri ?? undefined : undefined,
-      columns,
+        useTable && sourceKind === 'lake'
+          ? lakeMatch?.s3_uri ?? undefined
+          : undefined,
+      columns: safeColumns,
       joins,
       where_clause: whereClause || undefined,
-      group_by: groupBy,
+      group_by: safeGroupBy,
       tags: tags
         .split(',')
         .map((t) => t.trim())
         .filter(Boolean),
-      refs: joins.map((j) => j.source_model),
+      refs: allRefs,
     }
   }, [
     modelName,
@@ -239,6 +301,7 @@ export function VisualQueryBuilder({
     description,
     materialization,
     sourceKind,
+    sourceMode,
     sourceName,
     sourceTable,
     lakeTables,
@@ -247,6 +310,7 @@ export function VisualQueryBuilder({
     whereClause,
     groupBy,
     tags,
+    refs,
   ])
 
   return (
@@ -303,6 +367,15 @@ export function VisualQueryBuilder({
               placeholder="stg_orders"
               className="font-mono text-sm"
             />
+            {modelName && sanitizeIdentifier(modelName, 'model') !== modelName && (
+              <p className="text-[10px] text-muted-foreground">
+                Will be saved as{' '}
+                <span className="font-mono text-foreground">
+                  {sanitizeIdentifier(modelName, 'model') || '(invalid)'}
+                </span>{' '}
+                — dbt requires snake_case identifiers.
+              </p>
+            )}
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Layer</Label>
@@ -342,110 +415,224 @@ export function VisualQueryBuilder({
           </div>
         </div>
 
-        {/* Source (staging only) */}
-        {layer === 'staging' && (
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="space-y-1">
-              <Label className="text-xs">Source Schema</Label>
-              <Select value={schemaSelectValue} onValueChange={handleSchemaSelect}>
-                <SelectTrigger className="text-sm font-mono">
-                  <SelectValue placeholder="Select a source…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {warehouseSchemas.length > 0 && (
-                    <SelectGroup>
-                      <SelectLabel className="flex items-center gap-1.5 text-[11px]">
-                        <Database className="h-3 w-3" />
-                        ClickHouse
-                      </SelectLabel>
-                      {warehouseSchemas.map((s: { name: string }) => (
-                        <SelectItem
-                          key={`wh::${s.name}`}
-                          value={`wh::${s.name}`}
-                          className="font-mono text-xs"
-                        >
-                          {s.name}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  )}
-                  {warehouseSchemas.length > 0 && lakeNamespaces.length > 0 && (
-                    <SelectSeparator />
-                  )}
-                  {lakeNamespaces.length > 0 && (
-                    <SelectGroup>
-                      <SelectLabel className="flex items-center gap-1.5 text-[11px]">
-                        <Layers className="h-3 w-3" />
-                        Iceberg lake
-                      </SelectLabel>
-                      {lakeNamespaces.map((g) => (
-                        <SelectItem
-                          key={`lake::${g.namespace}`}
-                          value={`lake::${g.namespace}`}
-                          className="font-mono text-xs"
-                        >
-                          {g.namespace}{' '}
-                          <span className="text-muted-foreground">
-                            ({g.tables.length})
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  )}
-                  {warehouseSchemas.length === 0 && lakeNamespaces.length === 0 && (
-                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                      No sources available
-                    </div>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Source Table</Label>
-              <Select
-                value={sourceTable || undefined}
-                onValueChange={handleTableSelect}
-                disabled={!sourceName}
+        {/* Source — available for staging, intermediate and marts */}
+        <div className="space-y-3 mb-4 rounded-md border bg-muted/20 p-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-medium">Source</Label>
+            <div className="inline-flex rounded-md border bg-background p-0.5">
+              <Button
+                type="button"
+                size="sm"
+                variant={sourceMode === 'table' ? 'default' : 'ghost'}
+                className="h-7 text-[11px]"
+                onClick={() => setSourceMode('table')}
               >
-                <SelectTrigger className="text-sm font-mono">
-                  <SelectValue
-                    placeholder={
-                      sourceName ? 'Select a table…' : 'Pick a source first'
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {tableOptions.length === 0 ? (
-                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                      {sourceName
-                        ? sourceKind === 'lake'
-                          ? 'No Iceberg tables in this namespace'
-                          : 'No tables in this schema'
-                        : 'Pick a source first'}
-                    </div>
-                  ) : (
-                    tableOptions.map((t) => (
-                      <SelectItem
-                        key={t.name}
-                        value={t.name}
-                        className="font-mono text-xs"
-                      >
-                        <div className="flex flex-col">
-                          <span>{t.name}</span>
-                          {t.subtitle && (
-                            <span className="text-[10px] text-muted-foreground truncate">
-                              {t.subtitle}
-                            </span>
-                          )}
-                        </div>
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+                <Database className="h-3 w-3 mr-1" />
+                Source table
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={sourceMode === 'ref' ? 'default' : 'ghost'}
+                className="h-7 text-[11px]"
+                onClick={() => setSourceMode('ref')}
+              >
+                <GitBranch className="h-3 w-3 mr-1" />
+                Reference model
+              </Button>
             </div>
           </div>
-        )}
+          <p className="text-[10px] text-muted-foreground">
+            {sourceMode === 'table'
+              ? 'Read raw data from a ClickHouse schema or Iceberg lake namespace via source().'
+              : 'Compose one or more upstream dbt models via ref(). Recommended for intermediate and marts.'}
+          </p>
+
+          {sourceMode === 'table' ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Source Schema</Label>
+                <Select value={schemaSelectValue} onValueChange={handleSchemaSelect}>
+                  <SelectTrigger className="text-sm font-mono">
+                    <SelectValue placeholder="Select a source…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {warehouseSchemas.length > 0 && (
+                      <SelectGroup>
+                        <SelectLabel className="flex items-center gap-1.5 text-[11px]">
+                          <Database className="h-3 w-3" />
+                          ClickHouse
+                        </SelectLabel>
+                        {warehouseSchemas.map((s: { name: string }) => (
+                          <SelectItem
+                            key={`wh::${s.name}`}
+                            value={`wh::${s.name}`}
+                            className="font-mono text-xs"
+                          >
+                            {s.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    )}
+                    {warehouseSchemas.length > 0 && lakeNamespaces.length > 0 && (
+                      <SelectSeparator />
+                    )}
+                    {lakeNamespaces.length > 0 && (
+                      <SelectGroup>
+                        <SelectLabel className="flex items-center gap-1.5 text-[11px]">
+                          <Layers className="h-3 w-3" />
+                          Iceberg lake
+                        </SelectLabel>
+                        {lakeNamespaces.map((g) => (
+                          <SelectItem
+                            key={`lake::${g.namespace}`}
+                            value={`lake::${g.namespace}`}
+                            className="font-mono text-xs"
+                          >
+                            {g.namespace}{' '}
+                            <span className="text-muted-foreground">
+                              ({g.tables.length})
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    )}
+                    {warehouseSchemas.length === 0 && lakeNamespaces.length === 0 && (
+                      <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                        No sources available
+                      </div>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Source Table</Label>
+                <Select
+                  value={sourceTable || undefined}
+                  onValueChange={handleTableSelect}
+                  disabled={!sourceName}
+                >
+                  <SelectTrigger className="text-sm font-mono">
+                    <SelectValue
+                      placeholder={
+                        sourceName ? 'Select a table…' : 'Pick a source first'
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tableOptions.length === 0 ? (
+                      <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                        {sourceName
+                          ? sourceKind === 'lake'
+                            ? 'No Iceberg tables in this namespace'
+                            : 'No tables in this schema'
+                          : 'Pick a source first'}
+                      </div>
+                    ) : (
+                      tableOptions.map((t) => (
+                        <SelectItem
+                          key={t.name}
+                          value={t.name}
+                          className="font-mono text-xs"
+                        >
+                          <div className="flex flex-col">
+                            <span>{t.name}</span>
+                            {t.subtitle && (
+                              <span className="text-[10px] text-muted-foreground truncate">
+                                {t.subtitle}
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-end gap-2">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Reference Model</Label>
+                  <Select
+                    value={refToAdd || undefined}
+                    onValueChange={(v) => setRefToAdd(v)}
+                    disabled={availableModels.length === 0}
+                  >
+                    <SelectTrigger className="text-sm font-mono">
+                      <SelectValue
+                        placeholder={
+                          availableModels.length === 0
+                            ? 'No models available'
+                            : 'Pick an upstream model…'
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableModels
+                        .filter((m) => !refs.includes(m))
+                        .map((m) => (
+                          <SelectItem
+                            key={m}
+                            value={m}
+                            className="font-mono text-xs"
+                          >
+                            {m}
+                          </SelectItem>
+                        ))}
+                      {availableModels.filter((m) => !refs.includes(m)).length ===
+                        0 && (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                          No more models to add
+                        </div>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-9"
+                  disabled={!refToAdd || refs.includes(refToAdd)}
+                  onClick={() => {
+                    if (refToAdd && !refs.includes(refToAdd)) {
+                      setRefs((prev) => [...prev, refToAdd])
+                      setRefToAdd('')
+                    }
+                  }}
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Add
+                </Button>
+              </div>
+              {refs.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {refs.map((r) => (
+                    <Badge
+                      key={r}
+                      variant="secondary"
+                      className="font-mono text-[11px] gap-1"
+                    >
+                      ref('{r}')
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRefs((prev) => prev.filter((x) => x !== r))
+                        }
+                        className="hover:text-destructive"
+                        aria-label={`Remove ${r}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="space-y-1 mb-4">
           <Label className="text-xs">Description</Label>

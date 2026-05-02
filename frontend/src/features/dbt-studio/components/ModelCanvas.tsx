@@ -559,13 +559,11 @@ function ModelPropertiesPanel({
             </div>
           </div>
 
-          {/* Warehouse binding (source / staging only) */}
-          {(definition.layer === 'source' || definition.layer === 'staging') && (
-            <WarehouseBindingSection
-              definition={definition}
-              onChange={onUpdate}
-            />
-          )}
+          {/* Warehouse binding (available on all layers) */}
+          <WarehouseBindingSection
+            definition={definition}
+            onChange={onUpdate}
+          />
 
           {/* Columns */}
           <div className="space-y-4">

@@ -354,6 +354,119 @@ jobs:
         run: docker compose down -v
 
   # ============================================
+  # Superset Integration E2E (Phase 9)
+  # ============================================
+  # Spins the full Compose stack with the `superset` profile, applies
+  # Alembic migrations (including the AI Workbench migration
+  # `f5d8a1c20b3e`), seeds two tenants + the fixture mart, then runs the
+  # single Superset Playwright spec. Only runs when the Superset surface
+  # is touched.
+  superset-e2e:
+    name: Superset E2E
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: |
+      github.event_name == 'pull_request' && (
+        contains(join(github.event.pull_request.changed_files.*.filename), 'backend/app/domains/analytics/superset/')
+        || contains(join(github.event.pull_request.changed_files.*.filename), 'frontend/src/services/supersetService.ts')
+        || contains(join(github.event.pull_request.changed_files.*.filename), 'frontend/src/features/query/')
+      ) || github.event_name == 'workflow_dispatch'
+
+    env:
+      SUPERSET_ENABLED: 'true'
+      FEATURE_SUPERSET_BACKEND_DEFAULT: 'true'
+      COMPOSE_PROFILES: 'superset'
+      E2E_BASE_URL: 'http://localhost:5173'
+      E2E_API_URL: 'http://localhost:5000'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+
+      - name: Start full stack with Superset profile
+        run: docker compose --profile superset up -d
+
+      - name: Wait for backend, frontend, and Superset
+        run: |
+          echo "Waiting for full stack with Superset to be ready..."
+          sleep 60
+          for i in {1..30}; do
+            curl -sf http://localhost:5000/api/v1/health && break
+            echo "backend not ready yet ($i/30)"; sleep 5
+          done
+          for i in {1..30}; do
+            curl -sf http://localhost:5173 && break
+            echo "frontend not ready yet ($i/30)"; sleep 5
+          done
+          for i in {1..30}; do
+            curl -sf http://localhost:8088/health && break
+            echo "superset not ready yet ($i/30)"; sleep 5
+          done
+
+      - name: Run Alembic migrations (incl. AI Workbench f5d8a1c20b3e)
+        run: |
+          docker compose exec -T backend alembic upgrade head
+
+      - name: Seed two tenants and fixture mart
+        run: |
+          docker compose exec -T backend python -m app.commands seed-superset-e2e \
+            || docker compose exec -T backend python scripts/seed_superset_e2e.py \
+            || echo "seed script not present yet — relying on default seed data"
+
+      - name: Run Superset E2E spec
+        run: npx playwright test e2e/tests/superset-integration.spec.ts
+        working-directory: frontend
+        env:
+          CI: 'true'
+          E2E_TENANT_A_EMAIL: ${{ env.E2E_TENANT_A_EMAIL || 'admin-a@example.com' }}
+          E2E_TENANT_A_PASSWORD: ${{ env.E2E_TENANT_A_PASSWORD || 'Admin123!' }}
+          E2E_TENANT_B_EMAIL: ${{ env.E2E_TENANT_B_EMAIL || 'admin-b@example.com' }}
+          E2E_TENANT_B_PASSWORD: ${{ env.E2E_TENANT_B_PASSWORD || 'Admin123!' }}
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-superset
+          path: frontend/playwright-report/
+          retention-days: 30
+
+      - name: Capture Superset & backend logs on failure
+        if: failure()
+        run: |
+          docker compose logs superset > superset.log || true
+          docker compose logs backend > backend.log || true
+
+      - name: Upload service logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: superset-e2e-logs
+          path: |
+            superset.log
+            backend.log
+          retention-days: 14
+
+      - name: Stop services
+        if: always()
+        run: docker compose --profile superset down -v
+
+  # ============================================
   # Build Docker Images
   # ============================================
   build:

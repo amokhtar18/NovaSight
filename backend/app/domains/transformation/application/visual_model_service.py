@@ -398,7 +398,7 @@ class VisualModelService:
         # Iceberg validator would reject every model.
         if not bucket:
             import re as _re
-            bucket = f"novasight-{_re.sub(r'[^a-z0-9-]', '-', tenant.slug.lower())}"
+            bucket = f"tenant-{_re.sub(r'[^a-z0-9-]', '-', tenant.slug.lower())}"
 
         # List ingestion pipelines that have produced data
         pipelines = (

@@ -124,6 +124,14 @@ DB_CONNECTION_MUTATOR = _mutators.db_connection_mutator
 SQLALCHEMY_URI_MUTATOR = _mutators.sqlalchemy_uri_mutator
 
 # ---------------------------------------------------------------------------
+# Boot-time permission lockdown — runs on every Flask boot, idempotent.
+# ---------------------------------------------------------------------------
+
+from app.domains.analytics.superset import permissions as _permissions  # noqa: E402
+
+FLASK_APP_MUTATOR = _permissions.flask_app_mutator
+
+# ---------------------------------------------------------------------------
 # Feature flags
 # ---------------------------------------------------------------------------
 
