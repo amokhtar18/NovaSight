@@ -19,7 +19,6 @@ from app.extensions import db
 from app.domains.analytics.domain.chart_models import (
     Chart, ChartFolder, ChartType, ChartSourceType, DashboardChart
 )
-from app.domains.transformation.application.semantic_service import SemanticService, QueryBuildError
 from app.domains.analytics.infrastructure.clickhouse_client import (
     get_clickhouse_client,
     ClickHouseError,
@@ -269,7 +268,7 @@ class ChartService:
         chart_type: str,
         source_type: str,
         description: Optional[str] = None,
-        semantic_model_id: Optional[str] = None,
+        dataset_id: Optional[str] = None,
         sql_query: Optional[str] = None,
         query_config: Optional[Dict] = None,
         viz_config: Optional[Dict] = None,
@@ -280,40 +279,40 @@ class ChartService:
     ) -> Chart:
         """
         Create a new chart.
-        
+
         Args:
             tenant_id: Tenant identifier
             created_by: Creator user ID
             name: Chart name
             chart_type: Visualization type
-            source_type: Data source type
+            source_type: Data source type (``dataset`` or ``sql_query``)
             description: Chart description
-            semantic_model_id: Semantic model for query building
-            sql_query: Raw SQL for SQL source type
+            dataset_id: Dataset to source from (required for ``dataset``)
+            sql_query: Raw SQL for ``sql_query`` source type
             query_config: Query configuration
             viz_config: Visualization configuration
             folder_id: Parent folder ID
             tags: List of tags
             is_public: Public visibility flag
             cache_ttl: Cache TTL in seconds
-        
+
         Returns:
             Created Chart instance
         """
         # Validate source type and required fields
         if source_type == ChartSourceType.SQL_QUERY.value and not sql_query:
             raise ChartValidationError("SQL query is required for SQL source type")
-        
-        if source_type == ChartSourceType.SEMANTIC_MODEL.value and not semantic_model_id:
+
+        if source_type == ChartSourceType.DATASET.value and not dataset_id:
             raise ChartValidationError(
-                "Semantic model ID is required for semantic model source type"
+                "Dataset ID is required for dataset source type"
             )
-        
+
         if sql_query and len(sql_query) > cls.MAX_SQL_LENGTH:
             raise ChartValidationError(
                 f"SQL query exceeds maximum length of {cls.MAX_SQL_LENGTH}"
             )
-        
+
         # Validate folder exists if provided
         if folder_id:
             folder = ChartFolder.query.filter(
@@ -322,7 +321,7 @@ class ChartService:
             ).first()
             if not folder:
                 raise ChartFolderNotFoundError(f"Folder not found: {folder_id}")
-        
+
         chart = Chart(
             id=uuid4(),
             tenant_id=UUID(str(tenant_id)),
@@ -331,7 +330,7 @@ class ChartService:
             description=description,
             chart_type=ChartType(chart_type),
             source_type=ChartSourceType(source_type),
-            semantic_model_id=UUID(str(semantic_model_id)) if semantic_model_id else None,
+            dataset_id=UUID(str(dataset_id)) if dataset_id else None,
             sql_query=sql_query,
             query_config=query_config or {},
             viz_config=viz_config or {},
@@ -375,7 +374,7 @@ class ChartService:
         
         allowed_fields = {
             'name', 'description', 'chart_type', 'source_type',
-            'semantic_model_id', 'sql_query', 'query_config', 'viz_config',
+            'dataset_id', 'sql_query', 'query_config', 'viz_config',
             'folder_id', 'tags', 'is_public', 'cache_ttl_seconds'
         }
         
@@ -388,7 +387,7 @@ class ChartService:
                     value = ChartSourceType(value)
                 elif field == 'folder_id' and isinstance(value, str):
                     value = UUID(value)
-                elif field == 'semantic_model_id' and isinstance(value, str):
+                elif field == 'dataset_id' and isinstance(value, str):
                     value = UUID(value)
                 
                 setattr(chart, field, value)
@@ -473,7 +472,7 @@ class ChartService:
             chart_type=original.chart_type.value,
             source_type=original.source_type.value,
             description=original.description,
-            semantic_model_id=str(original.semantic_model_id) if original.semantic_model_id else None,
+            dataset_id=str(original.dataset_id) if original.dataset_id else None,
             sql_query=original.sql_query,
             query_config=original.query_config.copy() if original.query_config else None,
             viz_config=original.viz_config.copy() if original.viz_config else None,
@@ -527,8 +526,8 @@ class ChartService:
         
         # Execute query based on source type
         try:
-            if chart.source_type == ChartSourceType.SEMANTIC_MODEL:
-                data, columns = cls._execute_semantic_query(
+            if chart.source_type == ChartSourceType.DATASET:
+                data, columns = cls._execute_dataset_query(
                     chart, tenant_id, runtime_filters
                 )
             else:
@@ -566,92 +565,105 @@ class ChartService:
         tenant_id: str,
         user_id: str,
         source_type: str,
-        semantic_model_id: Optional[str] = None,
+        dataset_id: Optional[str] = None,
         sql_query: Optional[str] = None,
         query_config: Optional[Dict] = None,
         limit: int = 100,
     ) -> Dict[str, Any]:
         """
         Preview query results without saving a chart.
-        
+
         Args:
             tenant_id: Tenant identifier
             user_id: User identifier
-            source_type: Data source type
-            semantic_model_id: Semantic model ID
-            sql_query: SQL query
+            source_type: Data source type (``dataset`` | ``sql_query``)
+            dataset_id: Dataset ID (required for ``dataset`` source)
+            sql_query: SQL query (required for ``sql_query`` source)
             query_config: Query configuration
             limit: Row limit
-        
+
         Returns:
             Dict with data and columns
         """
         start_time = time.time()
-        
+
         try:
-            if source_type == ChartSourceType.SEMANTIC_MODEL.value:
-                if not semantic_model_id:
-                    raise ChartValidationError("Semantic model ID required")
-                
-                # Build and execute via semantic service
-                semantic_service = SemanticService()
-                query_config = query_config or {}
-                query_config['limit'] = limit
-                
-                result = semantic_service.execute_query(
-                    tenant_id=tenant_id,
-                    semantic_model_id=semantic_model_id,
-                    query_config=query_config,
+            if source_type == ChartSourceType.DATASET.value:
+                if not dataset_id:
+                    raise ChartValidationError("Dataset ID required")
+                # Local import to avoid module-level cycle.
+                from app.domains.analytics.application.dataset_service import (
+                    DatasetService,
+                    DatasetServiceError,
                 )
-                data = result.get("data", [])
-                columns = result.get("columns", [])
+                try:
+                    res = DatasetService.execute_preview(
+                        tenant_id=tenant_id,
+                        dataset_id=dataset_id,
+                        limit=limit,
+                    )
+                except DatasetServiceError as exc:
+                    raise ChartExecutionError(str(exc))
+                # Normalise to chart preview shape (list[dict] rows).
+                col_meta = res.get("columns", [])
+                col_names = [c["name"] for c in col_meta]
+                rows = [dict(zip(col_names, r)) for r in res.get("rows", [])]
+                data, columns = rows, col_meta
             else:
                 if not sql_query:
                     raise ChartValidationError("SQL query required")
-                
+
                 # Execute raw SQL with limit
                 data, columns = cls._execute_raw_sql(
                     tenant_id, sql_query, limit
                 )
-        except QueryBuildError as e:
-            raise ChartExecutionError(f"Query build failed: {str(e)}")
+        except ChartExecutionError:
+            raise
         except Exception as e:
             logger.error(f"Preview query failed: {e}")
             raise ChartExecutionError(f"Query execution failed: {str(e)}")
-        
+
         execution_time_ms = int((time.time() - start_time) * 1000)
-        
+
         return {
             "data": data,
             "columns": columns,
             "row_count": len(data),
             "execution_time_ms": execution_time_ms,
         }
-    
+
     @classmethod
-    def _execute_semantic_query(
+    def _execute_dataset_query(
         cls,
         chart: Chart,
         tenant_id: str,
         runtime_filters: Optional[Dict] = None,
     ) -> Tuple[List[Dict], List[Dict]]:
-        """Execute query via semantic service."""
-        semantic_service = SemanticService()
-        
-        query_config = chart.query_config.copy() if chart.query_config else {}
-        
-        # Merge runtime filters
-        if runtime_filters:
-            existing_filters = query_config.get("filters", [])
-            query_config["filters"] = existing_filters + runtime_filters.get("filters", [])
-        
-        result = semantic_service.execute_query(
-            tenant_id=tenant_id,
-            semantic_model_id=str(chart.semantic_model_id),
-            query_config=query_config,
+        """Execute query against a saved Dataset."""
+        if not chart.dataset_id:
+            raise ChartExecutionError("Chart has no dataset_id configured")
+        # Local import to avoid module-level cycle.
+        from app.domains.analytics.application.dataset_service import (
+            DatasetService,
+            DatasetServiceError,
         )
-        
-        return result.get("data", []), result.get("columns", [])
+        limit = (
+            chart.query_config.get("limit", 1000)
+            if chart.query_config
+            else 1000
+        )
+        try:
+            res = DatasetService.execute_preview(
+                tenant_id=tenant_id,
+                dataset_id=str(chart.dataset_id),
+                limit=limit,
+            )
+        except DatasetServiceError as exc:
+            raise ChartExecutionError(str(exc))
+        col_meta = res.get("columns", [])
+        col_names = [c["name"] for c in col_meta]
+        rows = [dict(zip(col_names, r)) for r in res.get("rows", [])]
+        return rows, col_meta
     
     @classmethod
     def _execute_sql_query(

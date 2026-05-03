@@ -114,16 +114,37 @@ else
 fi
 
 # ── 4. Provision ClickHouse databases for all tenants ──
-# This ensures ClickHouse databases exist even if provisioning failed during seed
+# This ensures ClickHouse databases exist even if provisioning failed during seed.
+# We connect using the same env vars the Flask app uses, via the native
+# clickhouse_driver protocol (port 9000 inside the docker network).
 echo "🔧 Ensuring ClickHouse databases for all tenants..."
+echo "   Host=${CLICKHOUSE_HOST:-clickhouse} Port=${CLICKHOUSE_PORT:-9000} User=${CLICKHOUSE_USER:-default} DB=${CLICKHOUSE_DATABASE:-default}"
 MAX_CH_RETRIES=15
 CH_RETRY_COUNT=0
 until python -c "
-from app.services.clickhouse_client import ClickHouseClient
-client = ClickHouseClient()
+import os, sys
+from clickhouse_driver import Client
+host = os.environ.get('CLICKHOUSE_HOST', 'clickhouse')
+# Native protocol port. Some envs set CLICKHOUSE_PORT to the HTTP port (8123);
+# fall back to CLICKHOUSE_NATIVE_PORT or 9000 in that case.
+raw_port = os.environ.get('CLICKHOUSE_PORT') or os.environ.get('CLICKHOUSE_NATIVE_PORT') or '9000'
+try:
+    port = int(raw_port)
+except ValueError:
+    port = 9000
+if port == 8123:
+    port = int(os.environ.get('CLICKHOUSE_NATIVE_PORT', '9000'))
+user = os.environ.get('CLICKHOUSE_USER', 'default')
+password = os.environ.get('CLICKHOUSE_PASSWORD', '')
+database = os.environ.get('CLICKHOUSE_DATABASE', 'default')
+secure = os.environ.get('CLICKHOUSE_SECURE', '').lower() in ('1', 'true', 'yes')
+client = Client(
+    host=host, port=port, user=user, password=password,
+    database=database, secure=secure, connect_timeout=5,
+)
 client.execute('SELECT 1')
-print('ClickHouse connected!')
-" 2>/dev/null; do
+print(f'ClickHouse connected at {host}:{port} as {user}!')
+" 2>&1; do
     CH_RETRY_COUNT=$((CH_RETRY_COUNT + 1))
     if [ $CH_RETRY_COUNT -ge $MAX_CH_RETRIES ]; then
         echo "⚠️  ClickHouse not ready after ${MAX_CH_RETRIES} attempts. Skipping provisioning..."
@@ -146,19 +167,10 @@ echo "║           NovaSight Backend Ready! 🚀                 ║"
 echo "╚═══════════════════════════════════════════════════════╝"
 echo ""
 
-# ── 4b. Install dbt packages (idempotent, container-local path) ──
-DBT_PROJECT_DIR="${DBT_PROJECT_DIR:-/app/dbt}"
-DBT_PROFILES_DIR="${DBT_PROFILES_DIR:-/app/dbt}"
-export DBT_PACKAGES_INSTALL_PATH="${DBT_PACKAGES_INSTALL_PATH:-/var/dbt_packages}"
-if [ -f "$DBT_PROJECT_DIR/packages.yml" ] && command -v dbt >/dev/null 2>&1; then
-    echo "📦 Installing dbt packages to $DBT_PACKAGES_INSTALL_PATH ..."
-    mkdir -p "$DBT_PACKAGES_INSTALL_PATH"
-    (
-        cd "$DBT_PROJECT_DIR" && \
-        dbt deps --project-dir "$DBT_PROJECT_DIR" --profiles-dir "$DBT_PROFILES_DIR" 2>&1 \
-            | tail -20
-    ) || echo "⚠️  dbt deps failed (non-fatal). dbt runs may still work if packages aren't required."
-fi
+# ── dbt packages ──
+# Packages are now baked into the image at build time (see
+# backend/Dockerfile.dev) and installed at $DBT_PACKAGES_INSTALL_PATH.
+# No runtime `dbt deps` is needed.
 
 # ── 5. Start the application ──
 exec "$@"

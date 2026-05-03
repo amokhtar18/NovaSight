@@ -109,6 +109,11 @@ class AuthService:
                 minutes = remaining // 60 + 1
                 return None, f"Account locked. Try again in {minutes} minutes."
 
+            # Build the candidate set. The (tenant_id, email) uniqueness
+            # constraint means the same email may legitimately exist in
+            # multiple tenants, so we MUST scope by tenant before picking
+            # a single user — otherwise login silently authenticates the
+            # caller into an arbitrary tenant (typically the demo one).
             query = User.query.filter(User.email == identifier)
 
             if tenant_slug:
@@ -118,12 +123,30 @@ class AuthService:
                     return None, "Invalid credentials"
                 query = query.filter(User.tenant_id == tenant.id)
 
-            user = query.first()
+            candidates = query.all()
 
-            if not user:
+            if not candidates:
                 logger.warning(f"Authentication failed: user {email} not found")
                 login_tracker.record_attempt(identifier, success=False)
                 return None, "Invalid credentials"
+
+            # When the caller did not specify a tenant and the email exists
+            # in more than one tenant, refuse to guess. Returning the first
+            # match is a tenant-isolation bug.
+            if len(candidates) > 1 and not tenant_slug:
+                logger.warning(
+                    "Authentication ambiguous: email %s exists in %d tenants; "
+                    "tenant_slug required",
+                    email,
+                    len(candidates),
+                )
+                login_tracker.record_attempt(identifier, success=False)
+                return None, (
+                    "This email is registered in multiple workspaces. "
+                    "Please specify your tenant."
+                )
+
+            user = candidates[0]
 
             if user.status != "active":
                 logger.warning(f"Authentication failed: user {email} is not active")
@@ -152,7 +175,11 @@ class AuthService:
 
             db.session.commit()
 
-            logger.info(f"User {email} authenticated successfully")
+            logger.info(
+                "User %s authenticated successfully into tenant %s",
+                email,
+                getattr(user.tenant, "slug", user.tenant_id),
+            )
             return user, None
 
         except Exception as e:

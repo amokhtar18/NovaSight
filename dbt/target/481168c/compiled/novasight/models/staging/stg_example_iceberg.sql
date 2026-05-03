@@ -1,0 +1,13 @@
+
+
+
+
+
+  -- Non-lake targets: Create empty placeholder
+  -- (marts should use ref() to the actual materialized source)
+  SELECT
+    NULL as id,
+    NULL as name,
+    CURRENT_TIMESTAMP as _loaded_at
+  WHERE 1 = 0
+  

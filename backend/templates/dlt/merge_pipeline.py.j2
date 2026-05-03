@@ -22,7 +22,7 @@ import logging
 from datetime import datetime
 
 import dlt
-from dlt.sources.sql_database import sql_database
+from dlt.sources.sql_database import sql_database, sql_table
 
 # Configure logging
 logging.basicConfig(
@@ -62,6 +62,51 @@ PRIMARY_KEY_COLUMNS = [
 # Source connection configuration
 SOURCE_CONNECTION_STRING = os.environ.get("SOURCE_CONNECTION_STRING", "{{ source_connection_string }}")
 SOURCE_TYPE = "{{ source_type }}"
+
+# ============================================
+# Oracle thick-mode initialization
+# --------------------------------------------
+# python-oracledb defaults to *thin* mode (pure Python). Many enterprise
+# Oracle servers (11g/12c/18c/19c with certain patch levels) reject thin
+# mode with DPY-3010 and require the Oracle Instant Client ("thick mode").
+#
+# Behavior is controlled by env vars injected by dlt_runner from the saved
+# connection's extra_params:
+#   ORACLE_THICK_MODE=1            → enable thick mode (default for Oracle)
+#   ORACLE_THICK_MODE=0            → force thin mode
+#   ORACLE_INSTANT_CLIENT_DIR=...  → explicit lib_dir for init_oracle_client
+#   ORACLE_WALLET_LOCATION=...     → wallet directory (TLS / mTLS)
+# The container image ships Instant Client at /opt/oracle/instantclient_23_5
+# and exports LD_LIBRARY_PATH, so init_oracle_client() works without args.
+# ============================================
+if SOURCE_CONNECTION_STRING.startswith("oracle") and os.environ.get("ORACLE_THICK_MODE", "1") == "1":
+    try:
+        import oracledb as _oracledb  # noqa: WPS433
+        try:
+            _lib_dir = os.environ.get("ORACLE_INSTANT_CLIENT_DIR")
+            _config_dir = os.environ.get("ORACLE_WALLET_LOCATION")
+            _init_kwargs = {}
+            if _lib_dir:
+                _init_kwargs["lib_dir"] = _lib_dir
+            if _config_dir:
+                _init_kwargs["config_dir"] = _config_dir
+            _oracledb.init_oracle_client(**_init_kwargs)
+            logger.info(
+                "oracledb thick mode initialized (lib_dir=%s, config_dir=%s)",
+                _lib_dir or "<default>",
+                _config_dir or "<none>",
+            )
+        except _oracledb.Error as _ora_init_err:
+            # Already initialized in this process — safe to ignore.
+            if "already been initialized" not in str(_ora_init_err).lower():
+                logger.warning(
+                    "oracledb.init_oracle_client() failed: %s. "
+                    "Falling back to thin mode (will fail with DPY-3010 "
+                    "if the server requires thick mode).",
+                    _ora_init_err,
+                )
+    except ImportError:
+        logger.warning("oracledb not installed; cannot enable thick mode")
 {% if source_type == "table" %}
 SOURCE_SCHEMA = "{{ source_schema }}"
 SOURCE_TABLE = "{{ source_table }}"
@@ -83,13 +128,14 @@ INCREMENTAL_CURSOR_COLUMN = "{{ incremental_cursor_column }}"
 
 
 def get_source():
-    """Create the dlt source for data extraction."""
+    """Create the dlt source/resource for data extraction."""
     {% if source_type == "table" %}
-    # Extract from table
-    source = sql_database(
+    # Extract from a single table using sql_table (returns a DltResource).
+    # sql_table accepts the `incremental` argument; sql_database does not.
+    source = sql_table(
         credentials=SOURCE_CONNECTION_STRING,
         schema="{{ source_schema }}",
-        table_names=["{{ source_table }}"],
+        table="{{ source_table }}",
         {% if incremental_cursor_column %}
         incremental=dlt.sources.incremental(
             cursor_path="{{ incremental_cursor_column }}",
@@ -98,19 +144,25 @@ def get_source():
         {% endif %}
     )
     {% else %}
-    # Extract from query
-    source = sql_database(
-        credentials=SOURCE_CONNECTION_STRING,
-        query=SOURCE_QUERY,
+    # Extract from a custom SQL query via a dlt resource.
+    import sqlalchemy as _sa
+
+    @dlt.resource(name=ICEBERG_TABLE, write_disposition="merge", primary_key=PRIMARY_KEY_COLUMNS)
+    def _query_resource(
         {% if incremental_cursor_column %}
-        incremental=dlt.sources.incremental(
-            cursor_path="{{ incremental_cursor_column }}",
-            initial_value=None,
-        ),
+        cursor=dlt.sources.incremental("{{ incremental_cursor_column }}", initial_value=None),
         {% endif %}
-    )
+    ):
+        engine = _sa.create_engine(SOURCE_CONNECTION_STRING)
+        with engine.connect() as conn:
+            result = conn.execute(_sa.text(SOURCE_QUERY))
+            cols = list(result.keys())
+            for row in result:
+                yield dict(zip(cols, row))
+
+    source = _query_resource
     {% endif %}
-    
+
     return source
 
 
@@ -149,14 +201,13 @@ def run_pipeline():
             dataset_name=ICEBERG_NAMESPACE,
         )
         
-        # Get source data
+        # Get source data (DltResource for table, custom resource for query)
         source = get_source()
-        
-        # Select columns if specified
-        if COLUMNS:
-            source = source.select(*COLUMNS)
-        
-        # Apply primary key for merge
+
+        # Apply primary key + merge disposition hints to the resource.
+        # NOTE: sql_database `.select(*names)` selects resources by name and
+        # does not perform column projection; column projection should be
+        # handled in the source query if needed.
         source.apply_hints(
             primary_key=PRIMARY_KEY_COLUMNS,
             write_disposition="merge",
@@ -179,7 +230,17 @@ def run_pipeline():
         logger.info(f"Load info: {info}")
         
         # Output metrics for Dagster
-        print(f"METRICS:rows={info.rows_processed or 0}")
+        # Output metrics for Dagster.
+        # dlt's LoadInfo doesn't expose a stable `rows_processed` attribute
+        # across versions — derive row count from load_packages/jobs and
+        # fall back to 0 if neither is available.
+        _rows = getattr(info, "rows_processed", None)
+        if _rows is None:
+            _rows = 0
+            for _pkg in getattr(info, "load_packages", []) or []:
+                for _job in getattr(_pkg, "jobs", {}).get("completed_jobs", []) or []:
+                    _rows += getattr(_job, "rows_count", 0) or 0
+        print(f"METRICS:rows={_rows}")
         print(f"METRICS:duration_ms={duration_ms}")
         print(f"METRICS:status=success")
         

@@ -1,21 +1,29 @@
 # NovaSight Backend Development Dockerfile
 # =========================================
-# Single-stage build with Flask + Dagster via supervisord
+# Single-stage build with Flask + Dagster via supervisord.
+#
+# Build context: REPOSITORY ROOT (so the image can reach both `backend/`
+# and `dbt/` for the dbt-deps bake step).
+#
+# Build manually with:
+#   docker build -f backend/Dockerfile.dev -t novasight-backend:dev .
+# (docker-compose.yml already wires this up via `context: .`).
 
 FROM python:3.11-slim
 
-# Set environment
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV FLASK_APP=app
-ENV FLASK_ENV=development
-ENV DEBIAN_FRONTEND=noninteractive
-ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_5:$LD_LIBRARY_PATH
-ENV DAGSTER_HOME=/app/orchestration
+# ── Environment ──
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    FLASK_APP=app \
+    FLASK_ENV=development \
+    DEBIAN_FRONTEND=noninteractive \
+    LD_LIBRARY_PATH=/opt/oracle/instantclient_23_5:$LD_LIBRARY_PATH \
+    DAGSTER_HOME=/app/orchestration \
+    DBT_PACKAGES_INSTALL_PATH=/var/dbt_packages
 
 WORKDIR /app
 
-# Install runtime dependencies including Oracle Instant Client requirements and supervisor
+# ── OS dependencies ──
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     libpq-dev \
@@ -30,7 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1
 
-# Install Oracle Instant Client for thick mode support (older Oracle DB versions)
+# ── Oracle Instant Client (thick mode for older Oracle DBs) ──
 RUN mkdir -p /opt/oracle && \
     wget -q https://download.oracle.com/otn_software/linux/instantclient/2350000/instantclient-basiclite-linux.x64-23.5.0.24.07.zip -O /tmp/instantclient.zip && \
     unzip -q /tmp/instantclient.zip -d /opt/oracle && \
@@ -38,28 +46,38 @@ RUN mkdir -p /opt/oracle && \
     echo /opt/oracle/instantclient_23_5 > /etc/ld.so.conf.d/oracle-instantclient.conf && \
     ldconfig
 
-# Copy and install Python dependencies
-COPY requirements.txt .
+# ── Python dependencies (includes dbt-core, dbt-duckdb, dbt-clickhouse) ──
+COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy dev dependencies if they exist
-COPY requirements-dev.txt* ./
+COPY backend/requirements-dev.txt* ./
 RUN if [ -f requirements-dev.txt ]; then pip install --no-cache-dir -r requirements-dev.txt; fi
 
-# Copy application code
-COPY . .
+# ── Pre-install dbt packages into the image ──
+# Resolves dbt_utils / dbt_expectations at build time so containers don't
+# need network access on first run, and so the bind-mounted /app/dbt
+# project doesn't get corrupted on Windows (see the note in
+# dbt/dbt_project.yml about packages-install-path).
+COPY dbt/packages.yml dbt/dbt_project.yml /tmp/dbt-deps/
+RUN mkdir -p "$DBT_PACKAGES_INSTALL_PATH" \
+    && dbt deps \
+        --project-dir /tmp/dbt-deps \
+        --profiles-dir /tmp/dbt-deps \
+    && rm -rf /tmp/dbt-deps
 
-# Create supervisor log directory
+# ── Application code ──
+COPY backend/ /app/
+
+# Runtime directories
 RUN mkdir -p /var/log/supervisor /var/dagster/logs
 
-# Copy supervisord configuration
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+# Supervisor config
+COPY backend/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Expose ports (Flask: 5000, Dagster: 3000)
+# Ports: Flask=5000, Dagster=3000
 EXPOSE 5000 3000
 
-# For development: use volume-mounted entrypoint for live updates
-# Ensure entrypoint from COPY . . is executable
+# Entrypoint executable
 RUN chmod +x /app/entrypoint.sh 2>/dev/null || true
 
 # Entrypoint runs migrations + seed, then exec's CMD

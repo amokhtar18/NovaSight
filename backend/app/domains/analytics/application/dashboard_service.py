@@ -15,7 +15,10 @@ from sqlalchemy import and_, or_
 
 from app.extensions import db
 from app.domains.analytics.domain.models import Dashboard, Widget, WidgetType
-from app.domains.transformation.application.semantic_service import SemanticService, QueryBuildError
+from app.domains.analytics.application.dataset_service import (
+    DatasetService,
+    DatasetServiceError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +53,7 @@ class DashboardService:
     Service for dashboard and widget operations.
     
     Provides methods for CRUD operations, sharing, layout management,
-    and widget data execution through the semantic layer.
+    and widget data execution through the configured Dataset.
     """
     
     # Default cache TTL for widget data (5 minutes)
@@ -771,24 +774,30 @@ class DashboardService:
         if filter_overrides:
             filters.extend(filter_overrides)
         
-        # Execute through semantic layer
-        try:
-            result = SemanticService.execute_query(
-                tenant_id=tenant_id,
-                dimensions=config.get('dimensions', []),
-                measures=config.get('measures', []),
-                filters=filters,
-                order_by=config.get('order_by', []),
-                limit=config.get('limit', 1000),
-                offset=config.get('offset', 0),
-                time_dimension=config.get('time_dimension'),
-                date_from=config.get('date_from'),
-                date_to=config.get('date_to'),
-                use_cache=use_cache,
+        # Execute through Dataset (canonical mart-backed source).
+        if not widget.dataset_id:
+            raise DashboardServiceError(
+                "Widget has no dataset configured; assign a dataset to enable execution."
             )
-        except QueryBuildError as e:
+        try:
+            res = DatasetService.execute_preview(
+                tenant_id=tenant_id,
+                dataset_id=str(widget.dataset_id),
+                limit=config.get('limit', 1000),
+            )
+        except DatasetServiceError as e:
             logger.error(f"Widget query failed: {e}")
             raise DashboardServiceError(f"Widget query execution failed: {e}")
+
+        # Normalise to {data, columns, row_count} shape.
+        col_meta = res.get("columns", [])
+        col_names = [c["name"] for c in col_meta]
+        rows = [dict(zip(col_names, r)) for r in res.get("rows", [])]
+        result = {
+            "data": rows,
+            "columns": col_meta,
+            "row_count": len(rows),
+        }
         
         # Cache results
         cache_ttl = current_app.config.get(

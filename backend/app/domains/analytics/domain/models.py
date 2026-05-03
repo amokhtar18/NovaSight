@@ -138,7 +138,7 @@ class Widget(TenantMixin, TimestampMixin, db.Model):
     Individual visualization widget within a dashboard.
     
     Widgets represent individual charts, tables, or metrics that
-    query data through the semantic layer.
+    query data through their assigned :class:`Dataset`.
     """
     __tablename__ = 'widgets'
     
@@ -154,7 +154,16 @@ class Widget(TenantMixin, TimestampMixin, db.Model):
     description = db.Column(Text, nullable=True)
     type = db.Column(SQLEnum(WidgetType), nullable=False)
     
-    # Query configuration for semantic layer
+    # Optional Dataset reference (Superset-inspired). When set, the widget
+    # queries this Dataset instead of relying solely on free-form query_config.
+    dataset_id = db.Column(
+        UUID(as_uuid=True),
+        ForeignKey('datasets.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True
+    )
+    
+    # Query configuration (filters/sort/limit) layered on the dataset
     query_config = db.Column(JSONB, nullable=False, default=dict)
     # Example:
     # {
@@ -208,6 +217,7 @@ class Widget(TenantMixin, TimestampMixin, db.Model):
             "name": self.name,
             "description": self.description,
             "type": self.type.value,
+            "dataset_id": str(self.dataset_id) if self.dataset_id else None,
             "query_config": self.query_config,
             "viz_config": self.viz_config,
             "grid_position": self.grid_position,

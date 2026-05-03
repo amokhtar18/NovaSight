@@ -26,6 +26,17 @@ RUN pip install --no-cache-dir \
     dagster-dbt>=0.25.0 \
     gql>=3.5.0
 
+# Pre-install dbt packages into the image so containers don't need
+# network access at first run and the bind-mounted /app/dbt is not
+# corrupted by `dbt deps` (Windows bind-mount semantics).
+ENV DBT_PACKAGES_INSTALL_PATH=/var/dbt_packages
+COPY dbt/packages.yml dbt/dbt_project.yml /tmp/dbt-deps/
+RUN mkdir -p "$DBT_PACKAGES_INSTALL_PATH" \
+    && dbt deps \
+        --project-dir /tmp/dbt-deps \
+        --profiles-dir /tmp/dbt-deps \
+    && rm -rf /tmp/dbt-deps
+
 # Copy application code
 COPY backend/ /app/backend/
 COPY dbt/ /app/dbt/

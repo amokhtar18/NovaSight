@@ -15,7 +15,7 @@ REM   production  Production deployment (requires confirmation)
 REM
 REM Options:
 REM   --build          Force rebuild containers
-REM   --clean          Remove volumes and start fresh
+REM   --clean          Wipe containers, volumes, project images, network and build cache (full fresh start)
 REM   --skip-tests     Skip running tests before deployment
 REM   --no-spark       Skip Spark cluster (dev/test only) [REMOVED — Spark no longer supported]
 REM
@@ -153,11 +153,15 @@ set "BUILD_FLAG="
 if "%BUILD%"=="true" set "BUILD_FLAG=--build"
 
 if "%CLEAN%"=="true" (
-    echo [INFO] Cleaning up existing containers and volumes...
+    echo [INFO] Wiping containers, volumes, images, and networks for a fresh start...
     if "%DRY_RUN%"=="true" (
-        echo [DRY-RUN] Would run: %COMPOSE_CMD% down -v
+        echo [DRY-RUN] Would run: %COMPOSE_CMD% down -v --remove-orphans --rmi local
+        echo [DRY-RUN] Would run: docker network rm novasight-network
+        echo [DRY-RUN] Would run: docker builder prune -af
     ) else (
-        %COMPOSE_CMD% down -v
+        %COMPOSE_CMD% down -v --remove-orphans --rmi local
+        docker network rm novasight-network 2>nul
+        docker builder prune -af >nul 2>nul
     )
 )
 

@@ -11,6 +11,7 @@ warning rather than producing a broken asset.
 Canonical location: ``app.domains.orchestration.infrastructure.asset_factory``
 """
 
+from pathlib import Path
 from typing import Callable, Dict, List
 import logging
 
@@ -110,6 +111,26 @@ class AssetFactory:
         """Convert task dependencies to AssetKeys."""
         return [AssetKey(dep) for dep in (task.depends_on or [])]
 
+    @staticmethod
+    def _read_dbt_log_tail(invocation, max_chars: int = 2000) -> str:
+        """Best-effort tail of the dbt.log file produced by a DbtCliInvocation.
+
+        ``DbtCliInvocation`` in current ``dagster-dbt`` versions does not
+        expose ``get_stdout``/``get_stderr``. The CLI writes a structured log
+        to ``<target_path>/dbt.log``; we read its tail for error reporting.
+        """
+        try:
+            target_path = getattr(invocation, "target_path", None)
+            if target_path is None:
+                return ""
+            log_path = Path(str(target_path)) / "dbt.log"
+            if not log_path.exists():
+                return ""
+            data = log_path.read_text(encoding="utf-8", errors="replace")
+            return data[-max_chars:]
+        except Exception:
+            return ""
+
     # ------------------------------------------------------------------
     # dlt
     # ------------------------------------------------------------------
@@ -168,7 +189,24 @@ class AssetFactory:
 
             if run_status != "success":
                 stderr_tail = result.get("stderr_tail") or ""
-                description = stderr_tail[:500] if stderr_tail else run_status
+                # Surface the most relevant ERROR/Exception line in the
+                # description so it isn't drowned out by INFO log preamble
+                # (Dagster's Failure description is space-constrained).
+                error_line = ""
+                for line in reversed(stderr_tail.splitlines()):
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    if (
+                        " ERROR " in stripped
+                        or "Error:" in stripped
+                        or "Exception" in stripped
+                        or "Traceback" in stripped
+                        or "failed:" in stripped.lower()
+                    ):
+                        error_line = stripped
+                        break
+                description = (error_line or stderr_tail or run_status)[-1500:]
                 raise Failure(
                     description=description,
                     metadata={
@@ -176,6 +214,14 @@ class AssetFactory:
                         "status": MetadataValue.text(run_status),
                         "exit_code": MetadataValue.text(
                             str(result.get("exit_code", ""))
+                        ),
+                        # Full stderr tail (up to ~4 KB) — not truncated to
+                        # 500 chars like the description, so the operator can
+                        # always see the underlying cause in the run page.
+                        "stderr_tail": MetadataValue.md(
+                            f"```\n{stderr_tail[-3500:]}\n```"
+                            if stderr_tail
+                            else "_(empty)_"
                         ),
                     },
                 )
@@ -284,11 +330,10 @@ class AssetFactory:
             # so we invoke the CLI directly and surface failures explicitly.
             invocation = dbt.cli(cmd, raise_on_error=False)
             invocation.wait()
-            if invocation.process.returncode != 0:
-                stdout = (invocation.get_stdout() or "")[-2000:]
-                stderr = (invocation.get_stderr() or "")[-2000:]
-                context.log.error("dbt stdout: %s", stdout)
-                context.log.error("dbt stderr: %s", stderr)
+            if not invocation.is_successful():
+                log_tail = self._read_dbt_log_tail(invocation)
+                if log_tail:
+                    context.log.error("dbt log tail:\n%s", log_tail)
                 raise Exception(
                     f"dbt {' '.join(cmd)} exited with code {invocation.process.returncode}"
                 )
@@ -330,11 +375,10 @@ class AssetFactory:
             dbt = context.resources.dbt
             invocation = dbt.cli(["test", "--select", select_arg], raise_on_error=False)
             invocation.wait()
-            if invocation.process.returncode != 0:
-                stdout = (invocation.get_stdout() or "")[-2000:]
-                stderr = (invocation.get_stderr() or "")[-2000:]
-                context.log.error("dbt stdout: %s", stdout)
-                context.log.error("dbt stderr: %s", stderr)
+            if not invocation.is_successful():
+                log_tail = self._read_dbt_log_tail(invocation)
+                if log_tail:
+                    context.log.error("dbt log tail:\n%s", log_tail)
                 raise Exception(
                     f"dbt test --select {select_arg} exited with code {invocation.process.returncode}"
                 )

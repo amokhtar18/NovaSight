@@ -1,6 +1,9 @@
 # NovaSight Backend Dockerfile
 # ============================
 # Multi-stage build for Flask API
+#
+# Build context: REPOSITORY ROOT (so backend/ and dbt/ are both available).
+#   docker build -f docker/backend/Dockerfile -t novasight-backend --target production .
 
 # ============================================
 # Base Stage
@@ -11,6 +14,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV DBT_PACKAGES_INSTALL_PATH=/var/dbt_packages
 
 WORKDIR /app
 
@@ -26,18 +30,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ============================================
 FROM base AS development
 
-# Install dev dependencies
-COPY requirements.txt .
+# Install Python deps (dbt CLI + adapters live here)
+COPY backend/requirements.txt .
 RUN pip install -r requirements.txt
 
-# Set development environment
+# Pre-install dbt packages so runtime doesn't need to call the registry
+COPY dbt/packages.yml dbt/dbt_project.yml /tmp/dbt-deps/
+RUN mkdir -p "$DBT_PACKAGES_INSTALL_PATH" \
+    && dbt deps \
+        --project-dir /tmp/dbt-deps \
+        --profiles-dir /tmp/dbt-deps \
+    && rm -rf /tmp/dbt-deps
+
 ENV FLASK_ENV=development
 ENV FLASK_DEBUG=1
 
-# Expose port
 EXPOSE 5000
 
-# Run with Flask development server
 CMD ["flask", "run", "--host=0.0.0.0", "--reload", "--debug"]
 
 # ============================================
@@ -45,7 +54,7 @@ CMD ["flask", "run", "--host=0.0.0.0", "--reload", "--debug"]
 # ============================================
 FROM base AS builder
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
 
 # ============================================
@@ -56,13 +65,14 @@ FROM python:3.11-slim AS production
 # Create non-root user
 RUN groupadd -r novasight && useradd -r -g novasight novasight
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV FLASK_ENV=production
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    FLASK_ENV=production \
+    DBT_PACKAGES_INSTALL_PATH=/var/dbt_packages
 
 WORKDIR /app
 
-# Install runtime dependencies only
+# Runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
@@ -72,11 +82,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
 
+# Pre-install dbt packages
+COPY dbt/packages.yml dbt/dbt_project.yml /tmp/dbt-deps/
+RUN mkdir -p "$DBT_PACKAGES_INSTALL_PATH" \
+    && dbt deps \
+        --project-dir /tmp/dbt-deps \
+        --profiles-dir /tmp/dbt-deps \
+    && rm -rf /tmp/dbt-deps \
+    && chown -R novasight:novasight "$DBT_PACKAGES_INSTALL_PATH"
+
 # Copy application code
-COPY --chown=novasight:novasight . .
+COPY --chown=novasight:novasight backend/ /app/
 
 # Copy entrypoint script
-COPY --chown=novasight:novasight ../docker/backend/entrypoint.sh /entrypoint.sh
+COPY --chown=novasight:novasight docker/backend/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh 2>/dev/null || true
 
 # Switch to non-root user

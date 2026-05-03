@@ -119,14 +119,29 @@ export function JobBuilderPage() {
   })
   const pipelines = pipelinesData?.items || []
 
-  // Pre-select pipeline from `?pipeline_id=...` query param when arriving
-  // from the Pipelines tab in the Scheduling page.
+  // Pre-fill from URL query params when arriving from the Scheduling page:
+  //   ?pipeline_id=<uuid>            → dlt job for that pipeline
+  //   ?kind=dbt_run|dbt_test         → dbt job
+  //   ?select=<dbt selector>         → pre-fill --select expression
+  //   ?name=<job name>               → pre-fill job name
   useEffect(() => {
     if (isEditing) return
-    const fromUrl = searchParams.get('pipeline_id')
-    if (fromUrl && !selectedPipelineId) {
-      setSelectedPipelineId(fromUrl)
+    const pipelineParam = searchParams.get('pipeline_id')
+    if (pipelineParam && !selectedPipelineId) {
+      setSelectedPipelineId(pipelineParam)
       setJobKind('dlt')
+    }
+    const kindParam = searchParams.get('kind')
+    if (kindParam === 'dbt_run' || kindParam === 'dbt_test') {
+      setJobKind(kindParam)
+    }
+    const selectParam = searchParams.get('select')
+    if (selectParam) {
+      setDbtSelectExpression(selectParam)
+    }
+    const nameParam = searchParams.get('name')
+    if (nameParam) {
+      setJobName(nameParam)
     }
   }, [isEditing, searchParams, selectedPipelineId])
 

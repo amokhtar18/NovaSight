@@ -38,13 +38,13 @@ models:
       {{ key }}: {{ value | tojson }}
 {% endfor %}
 {% endif %}
-{% if tags is defined and tags | length > 0 %}
+{% if tags and tags | length > 0 %}
     tags:
 {% for tag in tags %}
       - {{ tag }}
 {% endfor %}
 {% endif %}
-{% if columns is defined and columns | length > 0 %}
+{% if columns and columns | length > 0 %}
     columns:
 {% for column in columns %}
       - name: {{ column.name }}

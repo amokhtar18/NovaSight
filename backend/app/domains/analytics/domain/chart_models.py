@@ -36,8 +36,15 @@ class ChartType(str, Enum):
 
 
 class ChartSourceType(str, Enum):
-    """Data source type for charts."""
-    SEMANTIC_MODEL = "semantic_model"
+    """Data source type for charts.
+
+    NovaSight charts source data exclusively from:
+      * ``DATASET`` — Superset-inspired Dataset, typically auto-synced
+        from materialized dbt mart models on ClickHouse.
+      * ``SQL_QUERY`` — raw SQL escape hatch (SQL Editor / power users).
+    The historical ``semantic_model`` source has been removed.
+    """
+    DATASET = "dataset"
     SQL_QUERY = "sql_query"
 
 
@@ -93,11 +100,12 @@ class ChartFolder(TenantMixin, TimestampMixin, db.Model):
 class Chart(TenantMixin, TimestampMixin, db.Model):
     """
     Standalone chart that can be saved and reused across dashboards.
-    
-    Charts can source data from:
-    - Semantic models (recommended)
-    - Raw SQL queries (for advanced users)
-    
+
+    Charts source data from:
+    - Datasets (Superset-inspired, auto-synced from materialized dbt mart
+      models on ClickHouse) — the canonical path.
+    - Raw SQL queries (advanced users / SQL Editor).
+
     Charts are tenant-scoped and can be organized into folders.
     """
     __tablename__ = 'charts'
@@ -111,16 +119,17 @@ class Chart(TenantMixin, TimestampMixin, db.Model):
     
     # Data source configuration
     source_type = db.Column(SQLEnum(ChartSourceType), nullable=False)
-    
-    # For semantic model source
-    semantic_model_id = db.Column(
+
+    # For Dataset source (Superset-inspired). Charts built from a
+    # dbt-materialized mart or a saved SQL dataset reference it here.
+    dataset_id = db.Column(
         UUID(as_uuid=True),
-        ForeignKey('semantic_models.id', ondelete='SET NULL'),
+        ForeignKey('datasets.id', ondelete='SET NULL'),
         nullable=True,
         index=True
     )
     
-    # For SQL query source (or generated SQL from semantic model)
+    # For SQL query source (raw SQL escape hatch)
     sql_query = db.Column(Text, nullable=True)
     
     # Query configuration (dimensions, measures, filters, etc.)
@@ -177,7 +186,7 @@ class Chart(TenantMixin, TimestampMixin, db.Model):
     
     # Relationships
     creator = relationship('User', foreign_keys=[created_by], lazy='select')
-    semantic_model = relationship('SemanticModel', lazy='select')
+    dataset = relationship('Dataset', foreign_keys=[dataset_id], lazy='select')
     # Note: DashboardChart has relationship back to this model via foreign key
     
     def __repr__(self):
@@ -191,7 +200,7 @@ class Chart(TenantMixin, TimestampMixin, db.Model):
             "description": self.description,
             "chart_type": self.chart_type.value,
             "source_type": self.source_type.value,
-            "semantic_model_id": str(self.semantic_model_id) if self.semantic_model_id else None,
+            "dataset_id": str(self.dataset_id) if self.dataset_id else None,
             "query_config": self.query_config,
             "viz_config": self.viz_config,
             "folder_id": str(self.folder_id) if self.folder_id else None,

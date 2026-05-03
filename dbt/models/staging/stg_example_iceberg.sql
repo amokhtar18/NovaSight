@@ -25,7 +25,7 @@
   -- Lake target: Read from Iceberg via DuckDB
   SELECT
     *,
-    CURRENT_TIMESTAMP as _loaded_at
+    now() as _loaded_at
   FROM {{ iceberg_source(var('iceberg_namespace', 'tenant_default.raw'), 'example_table') }}
   
 {% else %}
@@ -34,7 +34,7 @@
   SELECT
     NULL as id,
     NULL as name,
-    CURRENT_TIMESTAMP as _loaded_at
+    now() as _loaded_at
   WHERE 1 = 0
   
 {% endif %}

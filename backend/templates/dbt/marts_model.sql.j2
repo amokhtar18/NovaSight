@@ -29,31 +29,25 @@ WARNING: Auto-generated file - do not edit manually
 -#}
 {% raw %}{{{% endraw %}
   config(
-    materialized='{{ materialized | default('table') }}'{% if unique_key is defined or schema is defined or partition_by is defined %},{% endif %}
-
-{% if schema is defined and schema %}
-    schema='{{ schema }}'{% if unique_key is defined or partition_by is defined %},{% endif %}
-
+    materialized='{{ materialized | default('table') }}',
+{% if schema %}
+    schema='{{ schema }}',
 {% endif %}
-{% if materialized == 'incremental' and unique_key is defined %}
+{% if materialized == 'incremental' and unique_key %}
 {% if unique_key is string %}
-    unique_key='{{ unique_key }}'{% if incremental_strategy is defined or partition_by is defined %},{% endif %}
-
+    unique_key='{{ unique_key }}',
 {% else %}
-    unique_key={{ unique_key | tojson }}{% if incremental_strategy is defined or partition_by is defined %},{% endif %}
-
+    unique_key={{ unique_key | tojson }},
 {% endif %}
-{% if incremental_strategy is defined %}
-    incremental_strategy='{{ incremental_strategy }}'{% if partition_by is defined %},{% endif %}
-
+{% if incremental_strategy %}
+    incremental_strategy='{{ incremental_strategy }}',
 {% endif %}
 {% endif %}
-{% if partition_by is defined and partition_by %}
-    partition_by={'field': '{{ partition_by }}', 'data_type': 'date'}{% if cluster_by is defined %},{% endif %}
-
+{% if partition_by %}
+    partition_by={'field': '{{ partition_by }}', 'data_type': 'date'},
 {% endif %}
-{% if cluster_by is defined and cluster_by | length > 0 %}
-    cluster_by={{ cluster_by | tojson }}
+{% if cluster_by and cluster_by | length > 0 %}
+    cluster_by={{ cluster_by | tojson }},
 {% endif %}
     tags=['marts', '{{ (model_name.split('_')[0]) if '_' in model_name else model_name }}']
   )
@@ -92,7 +86,7 @@ WARNING: Auto-generated file - do not edit manually
 {% endif %}
 {% endfor %}
     FROM {{ primary_alias }}
-{% if joins is defined and joins | length > 0 %}
+{% if joins and joins | length > 0 %}
 {% for join in joins %}
     {{ join.type | default('LEFT') | upper }} JOIN {{ join.model_alias | default(join.model | replace('int_', '') | replace('stg_', '')) }}
         ON {{ primary_alias }}.{{ join.left_key }} = {{ join.model_alias | default(join.model | replace('int_', '') | replace('stg_', '')) }}.{{ join.right_key }}
@@ -104,7 +98,7 @@ WARNING: Auto-generated file - do not edit manually
 {% if where_clause is defined and where_clause %}
     WHERE {{ where_clause }}
 {% endif %}
-{% if group_by is defined and group_by | length > 0 %}
+{% if group_by and group_by | length > 0 %}
     GROUP BY
 {% for col in group_by %}
         {{ col }}{% if not loop.last %},{% endif %}

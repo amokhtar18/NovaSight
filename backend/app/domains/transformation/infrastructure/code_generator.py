@@ -44,6 +44,19 @@ class DbtCodeGenerator:
         "marts": "marts_model.sql.j2",
     }
 
+    # Per-layer destination schema. dbt-clickhouse maps ``schema`` to a
+    # ClickHouse database, computing the final database as
+    # ``<profile_schema>_<model_schema>`` (e.g. profile schema
+    # ``tenant_acme`` + layer schema ``staging`` →
+    # ``tenant_acme_staging``). This routes each layer into a
+    # separate per-tenant database so layer selection in the UI
+    # deterministically drives the destination database.
+    LAYER_SCHEMA_MAP = {
+        "staging": "staging",
+        "intermediate": "intermediate",
+        "marts": "marts",
+    }
+
     def __init__(self, templates_dir: Path | None = None):
         tpl_dir = templates_dir or TEMPLATES_DIR
         self.env = Environment(
@@ -71,6 +84,14 @@ class DbtCodeGenerator:
 
         # Inject metadata
         config = dict(config)
+        # Auto-route to a per-layer ClickHouse database when the request
+        # didn't supply an explicit schema_name. The template emits
+        # ``config(schema='<value>')`` which dbt-clickhouse joins onto the
+        # profile's schema (the tenant database) → ``tenant_<slug>_<layer>``.
+        if not config.get("schema"):
+            layer_schema = self.LAYER_SCHEMA_MAP.get(layer)
+            if layer_schema:
+                config["schema"] = layer_schema
         config["_generated_at"] = datetime.utcnow().isoformat()
         config["_template_version"] = "1.0.0"
 

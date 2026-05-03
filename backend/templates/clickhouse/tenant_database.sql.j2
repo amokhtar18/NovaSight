@@ -30,6 +30,27 @@ ENGINE = Atomic
 COMMENT 'NovaSight tenant database for {{ tenant_slug }} (ID: {{ tenant_id }})';
 
 -- =============================================================================
+-- Per-Layer Databases (dbt destinations)
+-- =============================================================================
+-- dbt-clickhouse maps a model's ``schema`` config to a ClickHouse database,
+-- joining it onto the profile's schema as ``<profile_schema>_<model_schema>``.
+-- The DbtCodeGenerator auto-injects ``schema=<layer>`` for each layer
+-- (staging | intermediate | marts), so we pre-create the matching databases
+-- here. Without these, dbt run fails with "Database ... doesn't exist"
+-- because dbt-clickhouse will not auto-create databases on run.
+CREATE DATABASE IF NOT EXISTS {{ db_name }}_staging
+ENGINE = Atomic
+COMMENT 'NovaSight dbt staging layer for {{ tenant_slug }}';
+
+CREATE DATABASE IF NOT EXISTS {{ db_name }}_intermediate
+ENGINE = Atomic
+COMMENT 'NovaSight dbt intermediate layer for {{ tenant_slug }}';
+
+CREATE DATABASE IF NOT EXISTS {{ db_name }}_marts
+ENGINE = Atomic
+COMMENT 'NovaSight dbt marts layer for {{ tenant_slug }}';
+
+-- =============================================================================
 -- Core Events Table
 -- =============================================================================
 -- Primary table for all ingested events with optimized partitioning and TTL

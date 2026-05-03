@@ -363,6 +363,46 @@ export function useFileContent(path: string, enabled = true) {
 }
 
 /**
+ * Delete a project file (dbt model, test, snapshot, seed, macro, analysis).
+ *
+ * Invalidates the project structure and models queries on success so the
+ * tree and model lists refresh automatically.
+ */
+export function useDeleteProjectFile() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (path: string) => dbtProjectApi.deleteFile(path),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: dbtProjectKeys.structure() })
+      queryClient.invalidateQueries({ queryKey: dbtProjectKeys.models() })
+    },
+  })
+}
+
+/**
+ * Save (overwrite) a project file. On success, refreshes the cached file
+ * content for that path and invalidates the project structure (file size
+ * shown in the tree may change).
+ */
+export function useSaveProjectFile() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ path, content }: { path: string; content: string }) =>
+      dbtProjectApi.saveFile(path, content),
+    onSuccess: (_data, vars) => {
+      queryClient.setQueryData(dbtProjectKeys.file(vars.path), {
+        path: vars.path,
+        content: vars.content,
+      })
+      queryClient.invalidateQueries({ queryKey: dbtProjectKeys.structure() })
+      queryClient.invalidateQueries({ queryKey: dbtProjectKeys.models() })
+    },
+  })
+}
+
+/**
  * List project models
  */
 export function useProjectModels(enabled = true) {

@@ -158,6 +158,29 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
         logger.info(f"Created connection: {name} in tenant {self.tenant_id}")
         return connection
 
+    def delete_connection(self, connection_id: str) -> bool:
+        """Delete a connection within the current tenant.
+
+        Returns True if a row was deleted, False if not found.
+        """
+        connection = self.get_connection(connection_id)
+        if not connection:
+            return False
+
+        try:
+            db.session.delete(connection)
+            db.session.commit()
+            logger.info(
+                f"Deleted connection {connection_id} from tenant {self.tenant_id}"
+            )
+            return True
+        except Exception as e:
+            db.session.rollback()
+            logger.error(
+                f"Failed to delete connection {connection_id}: {e}"
+            )
+            raise
+
     def _create_database_connection(
         self,
         name: str,
@@ -211,6 +234,109 @@ class ConnectionService(IConnectionProvider, ISchemaProvider):
             ssl_mode=connection.ssl_mode,
             extra_params=connection.extra_params,
         )
+
+    def test_connection_params(
+        self,
+        db_type: str,
+        host: str,
+        port: int,
+        database: str,
+        username: str,
+        password: str,
+        ssl_mode: Optional[str] = None,
+        extra_params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Test a database connection without persisting it.
+
+        Returns a dict with ``success`` (bool), and either ``error`` /
+        ``details`` describing the outcome. Never raises — always
+        returns a structured response so the API layer can produce a
+        proper 400 instead of a 500.
+        """
+        try:
+            config = ConnectionConfig(
+                host=host,
+                port=int(port),
+                database=database,
+                username=username,
+                password=password,
+                ssl_mode=ssl_mode,
+                ssl=bool(ssl_mode),
+                extra_params=extra_params or {},
+            )
+        except Exception as exc:  # pydantic validation, type errors, etc.
+            logger.warning(
+                "Invalid connection parameters for %s: %s", db_type, exc
+            )
+            return {
+                "success": False,
+                "error": f"Invalid connection parameters: {exc}",
+                "details": {"db_type": db_type},
+            }
+
+        try:
+            connector = ConnectorRegistry.create_connector(db_type, config)
+        except KeyError:
+            return {
+                "success": False,
+                "error": f"Unsupported database type: {db_type}",
+                "details": {"db_type": db_type},
+            }
+        except Exception as exc:
+            logger.exception(
+                "Failed to instantiate %s connector", db_type
+            )
+            return {
+                "success": False,
+                "error": f"Connector unavailable: {exc}",
+                "details": {"db_type": db_type},
+            }
+
+        try:
+            with connector:
+                ok = bool(connector.test_connection())
+                schemas: List[str] = []
+                if ok:
+                    try:
+                        schemas = list(connector.get_schemas() or [])
+                    except Exception as exc:  # schema introspection is best-effort
+                        logger.warning(
+                            "Connection succeeded but schema introspection failed for %s: %s",
+                            db_type,
+                            exc,
+                        )
+            if ok:
+                return {
+                    "success": True,
+                    "details": {
+                        "db_type": db_type,
+                        "host": host,
+                        "port": port,
+                        "database": database,
+                        "schemas": schemas,
+                    },
+                }
+            return {
+                "success": False,
+                "error": "Connection test returned false",
+                "details": {"db_type": db_type},
+            }
+        except ConnectorException as exc:
+            return {
+                "success": False,
+                "error": str(exc),
+                "details": {"db_type": db_type},
+            }
+        except Exception as exc:  # last-resort guard
+            logger.exception(
+                "Unexpected error testing %s connection", db_type
+            )
+            return {
+                "success": False,
+                "error": str(exc),
+                "details": {"db_type": db_type},
+            }
 
     def preview_data(
         self,

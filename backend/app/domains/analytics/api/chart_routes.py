@@ -171,8 +171,8 @@ def create_chart():
         chart_type: Visualization type (required)
         source_type: Data source type (required)
         description: Chart description
-        semantic_model_id: Semantic model UUID (required for semantic_model source)
-        sql_query: SQL query (required for sql_query source)
+        dataset_id: Dataset UUID (required for ``dataset`` source)
+        sql_query: SQL query (required for ``sql_query`` source)
         query_config: Query configuration
         viz_config: Visualization configuration
         folder_id: Parent folder UUID
@@ -198,7 +198,7 @@ def create_chart():
             chart_type=data.chart_type.value,
             source_type=data.source_type.value,
             description=data.description,
-            semantic_model_id=str(data.semantic_model_id) if data.semantic_model_id else None,
+            dataset_id=str(data.dataset_id) if data.dataset_id else None,
             sql_query=data.sql_query,
             query_config=data.query_config.dict() if data.query_config else None,
             viz_config=data.viz_config.dict() if data.viz_config else None,
@@ -492,8 +492,8 @@ def preview_chart_data():
     
     Request Body:
         source_type: Data source type (required)
-        semantic_model_id: Semantic model UUID (for semantic_model source)
-        sql_query: SQL query (for sql_query source)
+        dataset_id: Dataset UUID (for ``dataset`` source)
+        sql_query: SQL query (for ``sql_query`` source)
         query_config: Query configuration
         limit: Row limit (default: 100)
     
@@ -513,7 +513,7 @@ def preview_chart_data():
             tenant_id=tenant_id,
             user_id=user_id,
             source_type=data.source_type.value,
-            semantic_model_id=str(data.semantic_model_id) if data.semantic_model_id else None,
+            dataset_id=str(data.dataset_id) if data.dataset_id else None,
             sql_query=data.sql_query,
             query_config=data.query_config.dict() if data.query_config else None,
             limit=data.limit,

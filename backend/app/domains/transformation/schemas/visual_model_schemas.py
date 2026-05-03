@@ -188,6 +188,27 @@ class VisualModelCreateRequest(BaseModel):
                 )
         return v
 
+    @validator('source_models', always=True)
+    def validate_source_models_for_layer(cls, v, values):
+        """Intermediate and marts layers require at least one source model
+        (either via ``source_models`` or ``refs``)."""
+        layer = values.get('model_layer')
+        refs = values.get('refs') or []
+        if layer in (ModelLayer.INTERMEDIATE, ModelLayer.MARTS):
+            if not v and not refs:
+                raise ValueError(
+                    f"{layer.value} models require at least one source "
+                    "model (set 'source_models' or 'refs')"
+                )
+        return v
+
+    @validator('columns', always=True)
+    def validate_columns_present(cls, v, values):
+        """All layers require at least one column."""
+        if not v:
+            raise ValueError("At least one column is required")
+        return v
+
     def to_code_gen_config(self) -> Dict[str, Any]:
         """Convert to template context for code generation."""
         # Build source_models list from refs if not provided directly

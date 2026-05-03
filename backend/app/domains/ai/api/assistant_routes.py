@@ -477,28 +477,39 @@ async def ollama_health():
                 model_names = [m.get('name', 'unknown') for m in models]
             except Exception:
                 model_names = []
-            
+
+            current_model = getattr(ollama_client, 'model', None)
             await ollama_client.close()
-            
+
             return jsonify({
                 'status': 'healthy',
                 'service': 'ollama',
+                'ollama_available': True,
+                'model': current_model,
                 'available_models': model_names
             }), 200
         else:
             await ollama_client.close()
+            # Return 200 so the frontend can read the payload and show "AI Offline"
+            # instead of treating the response as an error.
             return jsonify({
                 'status': 'unhealthy',
                 'service': 'ollama',
+                'ollama_available': False,
+                'model': None,
+                'available_models': [],
                 'message': 'Health check failed'
-            }), 503
-            
+            }), 200
+
     except Exception as e:
         return jsonify({
             'status': 'unhealthy',
             'service': 'ollama',
+            'ollama_available': False,
+            'model': None,
+            'available_models': [],
             'message': str(e)
-        }), 503
+        }), 200
 
 
 # =============================================================================

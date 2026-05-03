@@ -35,7 +35,7 @@ export function QueryPage() {
   const { data: healthData } = useQuery({
     queryKey: ['assistant', 'health'],
     queryFn: async () => {
-      const res = await api.get('/assistant/health')
+      const res = await api.get('/api/v1/assistant/health')
       return res.data as { status: string; ollama_available: boolean; model: string }
     },
     refetchInterval: 30000,
@@ -44,7 +44,7 @@ export function QueryPage() {
   const { data: modelsData } = useQuery({
     queryKey: ['assistant', 'models'],
     queryFn: async () => {
-      const res = await api.get('/assistant/models')
+      const res = await api.get('/api/v1/assistant/models')
       return res.data as { models: Array<{ name: string; size: number; modified_at: string }> }
     },
   })
@@ -53,7 +53,7 @@ export function QueryPage() {
     mutationFn: async (q: string) => {
       const body: Record<string, string> = { query: q }
       if (selectedModel) body.model = selectedModel
-      const response = await api.post<QueryResultType>('/assistant/query', body)
+      const response = await api.post<QueryResultType>('/api/v1/assistant/query', body)
       return response.data
     },
     onSuccess: (data, variables) => {

@@ -15,7 +15,7 @@
 #
 # Options:
 #   --build          Force rebuild containers
-#   --clean          Remove volumes and start fresh
+#   --clean          Wipe containers, volumes, project images, network and build cache
 #   --skip-tests     Skip running tests before deployment
 #   --no-ollama      Skip Ollama LLM service
 #   --no-airflow     Skip Airflow (use Dagster only)
@@ -216,11 +216,15 @@ deploy_development() {
     [ "$BUILD" = true ] && build_flag="--build"
     
     if [ "$CLEAN" = true ]; then
-        print_info "Cleaning up existing containers and volumes..."
+        print_info "Wiping containers, volumes, project images, network and build cache..."
         if [ "$DRY_RUN" = true ]; then
-            print_info "[DRY-RUN] Would run: $compose_cmd down -v"
+            print_info "[DRY-RUN] Would run: $compose_cmd down -v --remove-orphans --rmi local"
+            print_info "[DRY-RUN] Would run: docker network rm novasight-network"
+            print_info "[DRY-RUN] Would run: docker builder prune -af"
         else
-            $compose_cmd down -v
+            $compose_cmd down -v --remove-orphans --rmi local
+            docker network rm novasight-network 2>/dev/null || true
+            docker builder prune -af >/dev/null 2>&1 || true
         fi
     fi
     

@@ -28,6 +28,7 @@ from app.domains.orchestration.api.dagster_proxy import dagster_proxy_bp  # noqa
 # Analytics domain routes (canonical)
 from app.domains.analytics.api import dashboard_routes  # noqa: F401
 from app.domains.analytics.api import chart_routes  # noqa: F401
+from app.domains.analytics.api import dataset_routes  # noqa: F401
 
 # Transformation domain routes (canonical)
 from app.domains.transformation.api import semantic_routes  # noqa: F401

@@ -522,7 +522,211 @@ class TenantDbtProjectManager:
             return None
         
         return file_path.read_text(encoding='utf-8')
-    
+
+    # Directories under the tenant project where users are allowed to delete
+    # files via the API. Anything else (dbt_project.yml, profiles.yml,
+    # packages.yml, target/, logs/) is intentionally protected.
+    _DELETABLE_ROOT_DIRS = (
+        "models",
+        "tests",
+        "snapshots",
+        "seeds",
+        "macros",
+        "analyses",
+    )
+
+    # Directories under the tenant project where users are allowed to write
+    # (edit) files via the API. Mirrors ``_DELETABLE_ROOT_DIRS`` — the same
+    # safe set used for delete.
+    _WRITABLE_ROOT_DIRS = _DELETABLE_ROOT_DIRS
+
+    # File extensions accepted for in-place edit. Other extensions (binaries,
+    # parquet seeds, etc.) are rejected so we do not accidentally corrupt
+    # non-text artifacts.
+    _WRITABLE_EXTENSIONS = (".sql", ".yml", ".yaml", ".md", ".csv", ".sh", ".py")
+
+    # Hard cap on file size accepted by ``write_file``. dbt SQL/YAML files are
+    # always tiny; this prevents accidental DoS via huge payloads.
+    _MAX_WRITE_BYTES = 1 * 1024 * 1024  # 1 MiB
+
+    def _resolve_within_project(self, relative_path: str) -> Path:
+        """Resolve a relative path and ensure it lives under the project root.
+
+        Raises:
+            TenantDbtProjectError: If path is empty, escapes the root, or is
+                otherwise invalid.
+        """
+        if not relative_path or not relative_path.strip():
+            raise TenantDbtProjectError("File path is required")
+        rel = relative_path.strip().lstrip("/\\")
+        target = self.project_path / rel
+        try:
+            resolved = target.resolve()
+            project_root = self.project_path.resolve()
+            resolved.relative_to(project_root)
+        except (ValueError, OSError):
+            logger.warning("Refusing path outside project root: %s", relative_path)
+            raise TenantDbtProjectError("Invalid file path")
+        return resolved
+
+    def write_file(self, relative_path: str, content: str) -> Dict[str, Any]:
+        """
+        Overwrite (or create) a file inside the tenant dbt project.
+
+        Allowed only for files under ``models/``, ``tests/``, ``snapshots/``,
+        ``seeds/``, ``macros/`` and ``analyses/``, and only for the extensions
+        listed in ``_WRITABLE_EXTENSIONS``. The maximum payload is
+        ``_MAX_WRITE_BYTES``.
+
+        Args:
+            relative_path: Path relative to the project root, e.g.
+                ``models/staging/stg_orders.sql``.
+            content: New file contents (UTF-8 text).
+
+        Returns:
+            ``{"path": <relative path>, "size": <bytes written>}``.
+
+        Raises:
+            TenantDbtProjectError: On any validation or IO failure.
+        """
+        if content is None:
+            raise TenantDbtProjectError("File content is required")
+        if not isinstance(content, str):
+            raise TenantDbtProjectError("File content must be text")
+
+        encoded = content.encode("utf-8", errors="replace")
+        if len(encoded) > self._MAX_WRITE_BYTES:
+            raise TenantDbtProjectError(
+                f"File too large ({len(encoded)} bytes); max is "
+                f"{self._MAX_WRITE_BYTES} bytes"
+            )
+
+        resolved = self._resolve_within_project(relative_path)
+        project_root = self.project_path.resolve()
+        sub = resolved.relative_to(project_root)
+
+        if not sub.parts or sub.parts[0] not in self._WRITABLE_ROOT_DIRS:
+            raise TenantDbtProjectError(
+                f"Files under '{sub.parts[0] if sub.parts else ''}' "
+                f"cannot be edited via this API"
+            )
+
+        if resolved.suffix.lower() not in self._WRITABLE_EXTENSIONS:
+            raise TenantDbtProjectError(
+                f"Editing files with extension '{resolved.suffix}' is not allowed"
+            )
+
+        # Refuse to overwrite a directory or symlink target that points
+        # outside the project root.
+        if resolved.exists() and not resolved.is_file():
+            raise TenantDbtProjectError(f"Not a regular file: {relative_path}")
+
+        # Ensure parent directory exists for new files.
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+
+        # Atomic write: write to a temp file in the same directory, then
+        # rename — avoids leaving a half-written file if the process crashes.
+        tmp = resolved.with_suffix(resolved.suffix + ".tmp")
+        try:
+            tmp.write_bytes(encoded)
+            os.replace(tmp, resolved)
+        except OSError as exc:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+            raise TenantDbtProjectError(f"Failed to write file: {exc}")
+
+        rel_str = str(sub).replace("\\", "/")
+        logger.info(
+            "Updated dbt project file for tenant %s: %s (%d bytes)",
+            self.tenant_slug, rel_str, len(encoded),
+        )
+        return {"path": rel_str, "size": len(encoded)}
+
+    def delete_file(self, relative_path: str) -> Dict[str, Any]:
+        """
+        Delete a file (typically a dbt model) from the tenant project.
+
+        For ``.sql`` files inside ``models/``, the matching schema YAML
+        (``_<name>.yml``) in the same directory is also removed when present —
+        these pairs are how the visual model builder writes models.
+
+        Args:
+            relative_path: Path relative to the project root, e.g.
+                ``models/staging/stg_orders.sql``.
+
+        Returns:
+            Dict with the deleted paths::
+
+                {
+                    "deleted": ["models/staging/stg_orders.sql",
+                                "models/staging/_stg_orders.yml"],
+                }
+
+        Raises:
+            TenantDbtProjectError: If the path is invalid, escapes the project
+                root, points at a protected location, or the target file is
+                missing.
+        """
+        if not relative_path or not relative_path.strip():
+            raise TenantDbtProjectError("File path is required")
+
+        rel = relative_path.strip().lstrip("/\\")
+        target = self.project_path / rel
+
+        # Block path traversal: resolved file must live under the project root.
+        try:
+            resolved = target.resolve()
+            project_root = self.project_path.resolve()
+            resolved.relative_to(project_root)
+        except (ValueError, OSError):
+            logger.warning("Refusing delete outside project root: %s", relative_path)
+            raise TenantDbtProjectError("Invalid file path")
+
+        # Restrict deletion to the user-managed directories. Compare against
+        # the resolved project root so symlink-resolved paths still match.
+        try:
+            sub = resolved.relative_to(project_root)
+        except ValueError:
+            raise TenantDbtProjectError("Invalid file path")
+        if not sub.parts or sub.parts[0] not in self._DELETABLE_ROOT_DIRS:
+            raise TenantDbtProjectError(
+                f"Files under '{sub.parts[0] if sub.parts else ''}' "
+                f"cannot be deleted via this API"
+            )
+
+        if not resolved.exists():
+            raise TenantDbtProjectError(f"File not found: {relative_path}")
+        if not resolved.is_file():
+            raise TenantDbtProjectError(f"Not a regular file: {relative_path}")
+
+        deleted: List[str] = []
+        resolved.unlink()
+        deleted.append(str(sub).replace("\\", "/"))
+
+        # Best-effort cleanup of the paired schema YAML for visual models.
+        if resolved.suffix.lower() == ".sql" and sub.parts[0] == "models":
+            sibling = resolved.parent / f"_{resolved.stem}.yml"
+            if sibling.exists() and sibling.is_file():
+                try:
+                    sibling.relative_to(project_root)
+                    sibling.unlink()
+                    deleted.append(
+                        str(sibling.relative_to(project_root)).replace("\\", "/")
+                    )
+                except (ValueError, OSError) as exc:
+                    logger.warning(
+                        "Could not remove paired schema YAML %s: %s", sibling, exc
+                    )
+
+        logger.info(
+            "Deleted dbt project file(s) for tenant %s: %s",
+            self.tenant_slug, deleted,
+        )
+        return {"deleted": deleted}
+
     def list_models(self) -> List[Dict[str, Any]]:
         """
         List all models in the project.

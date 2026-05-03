@@ -29,6 +29,9 @@ WARNING: Auto-generated file - do not edit manually
 {% raw %}{{{% endraw %}
   config(
     materialized='{{ materialized | default("view") }}',
+{% if schema is defined and schema %}
+    schema='{{ schema }}',
+{% endif %}
     tags=['staging', '{{ source_name | default("iceberg") }}']
   )
 {% raw %}}}{% endraw %}

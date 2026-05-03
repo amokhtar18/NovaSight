@@ -36,7 +36,7 @@ semantic_models:
       agg_time_dimension: {{ time_dimension | default('event_date') }}
     
     entities:
-{% if entities is defined and entities | length > 0 %}
+{% if entities and entities | length > 0 %}
 {% for entity in entities %}
       - name: {{ entity.name }}
         type: {{ entity.type | default('primary') }}
@@ -61,7 +61,7 @@ semantic_models:
 {% if create_metric | default(true) %}
         create_metric: true
 {% endif %}
-{% if additional_measures is defined and additional_measures | length > 0 %}
+{% if additional_measures and additional_measures | length > 0 %}
 {% for measure in additional_measures %}
       - name: {{ measure.name }}
 {% if measure.label is defined %}
@@ -93,7 +93,7 @@ semantic_models:
 {% endif %}
 {% endfor %}
 
-{% if filters is defined and filters | length > 0 %}
+{% if filters and filters | length > 0 %}
 # Saved filters for this semantic model
 saved_queries:
 {% for filter in filters %}

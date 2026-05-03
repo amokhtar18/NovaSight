@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   Sparkles,
   Calendar,
+  Layers,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useState } from 'react'
@@ -32,6 +33,7 @@ const orchestrateNavigation = [
   { name: 'Scheduling', href: '/app/jobs', icon: Calendar },
   { name: 'Transform', href: '/app/dbt-studio', icon: GitBranch },
   { name: 'SQL Editor', href: '/app/sql', icon: Code2 },
+  { name: 'Datasets', href: '/app/datasets', icon: Layers },
   { name: 'Charts', href: '/app/charts', icon: PieChart },
   { name: 'Dashboards', href: '/app/dashboards', icon: LayoutDashboard },
 ]

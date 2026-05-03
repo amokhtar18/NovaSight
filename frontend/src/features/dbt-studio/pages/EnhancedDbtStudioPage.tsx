@@ -4,7 +4,6 @@
  * Extends the original DbtStudioPage with additional tabs for:
  * - Visual Query Builder (no-code SQL)
  * - Test Builder & Source Freshness
- * - Execution Dashboard & Log Viewer
  * - Schema Explorer (warehouse introspection)
  * - Semantic Layer Designer
  * - Package Manager
@@ -29,13 +28,11 @@ import {
   GitBranch,
   TestTube,
   FolderTree,
-  Terminal,
   ShieldCheck,
 } from 'lucide-react'
 import { GlassCard, GlassCardContent } from '@/components/ui/glass-card'
 import { fadeVariants, staggerContainerVariants } from '@/lib/motion-variants'
 import {
-  ModelCanvas,
   LineageViewer,
   ProjectViewer,
 } from '@/features/dbt-studio/components'
@@ -47,14 +44,11 @@ import {
   useDbtRun,
   useDbtTest,
 } from '@/features/dbt-studio/hooks/useDbtStudio'
-import type { VisualModelDefinition } from '@/features/dbt-studio/types'
-import type { Node, Edge } from 'reactflow'
 import { palette } from '@/lib/colors'
 
 // New visual builder imports
 import { VisualQueryBuilder } from '../components/sql-builder'
 import { TestConfigForm, FreshnessConfig, TestResultsTable } from '../components/test-builder'
-import { DbtCommandPanel, LogViewer, ExecutionHistory } from '../components/execution'
 import { CodePreview, SchemaExplorer } from '../components/shared'
 import {
   useVisualModels,
@@ -84,8 +78,6 @@ export function EnhancedDbtStudioPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState('builder')
-  const [builderMode, setBuilderMode] = useState<'canvas' | 'sql'>('sql')
-  const [logExecutionId, setLogExecutionId] = useState<string | undefined>()
   const [availableColumns, setAvailableColumns] = useState<WarehouseColumn[]>([])
   const [selectedSchema, setSelectedSchema] = useState<string>()
   const [selectedTable, setSelectedTable] = useState<string>()
@@ -189,19 +181,6 @@ export function EnhancedDbtStudioPage() {
     }
   }
 
-  // Canvas handlers
-  const handleSaveModels = async (
-    _nodes: Node[],
-    _edges: Edge[],
-    definitions: Map<string, VisualModelDefinition>
-  ) => {
-    toast({ title: 'Models saved', description: `${definitions.size} models saved` })
-  }
-
-  const handleValidateModels = async (_definitions: Map<string, VisualModelDefinition>) => {
-    toast({ title: 'Validation complete', description: 'All models valid' })
-  }
-
   // Visual query builder handlers
   const handleVisualSave = useCallback(
     async (payload: VisualModelCreatePayload) => {
@@ -230,7 +209,6 @@ export function EnhancedDbtStudioPage() {
     setSelectedSchema(undefined)
     setSelectedTable(undefined)
     setAvailableColumns([])
-    setBuilderMode('sql')
     setActiveTab('builder')
     setBuilderResetKey((k) => k + 1)
   }, [])
@@ -443,7 +421,7 @@ export function EnhancedDbtStudioPage() {
       {/* Main Content */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 w-full">
         <TabsList
-          className="mb-6 grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 h-auto gap-1 rounded-xl border border-border/60 bg-gradient-to-br from-muted/40 via-muted/20 to-transparent p-1.5 shadow-sm backdrop-blur-sm"
+          className="mb-6 grid w-full grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 h-auto gap-1 rounded-xl border border-border/60 bg-gradient-to-br from-muted/40 via-muted/20 to-transparent p-1.5 shadow-sm backdrop-blur-sm"
         >
           <TabsTrigger
             value="builder"
@@ -467,13 +445,6 @@ export function EnhancedDbtStudioPage() {
             Tests
           </TabsTrigger>
           <TabsTrigger
-            value="execution"
-            className="group flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all hover:bg-background/60 data-[state=active]:bg-gradient-to-br data-[state=active]:from-indigo-500 data-[state=active]:to-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-indigo-500/30"
-          >
-            <Terminal className="h-4 w-4" />
-            Execution
-          </TabsTrigger>
-          <TabsTrigger
             value="project"
             className="group flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all hover:bg-background/60 data-[state=active]:bg-gradient-to-br data-[state=active]:from-indigo-500 data-[state=active]:to-purple-600 data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-indigo-500/30"
           >
@@ -482,84 +453,39 @@ export function EnhancedDbtStudioPage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* ── Model Builder (Canvas + SQL Builder) ────────────────────── */}
+        {/* ── Model Builder (SQL Builder) ──────────────────────────── */}
         <TabsContent value="builder" className="space-y-4">
-          {/* Inner mode switch */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Build using:</span>
-            <div className="inline-flex rounded-md border bg-muted/30 p-0.5">
-              <Button
-                size="sm"
-                variant={builderMode === 'sql' ? 'default' : 'ghost'}
-                className="h-7 text-xs"
-                onClick={() => setBuilderMode('sql')}
-              >
-                <Database className="h-3.5 w-3.5 mr-1" />
-                SQL Builder
-              </Button>
-              <Button
-                size="sm"
-                variant={builderMode === 'canvas' ? 'default' : 'ghost'}
-                className="h-7 text-xs"
-                onClick={() => setBuilderMode('canvas')}
-              >
-                <FileCode2 className="h-3.5 w-3.5 mr-1" />
-                Canvas
-              </Button>
+          <div className="grid grid-cols-[1fr_360px] gap-4">
+            <div className="space-y-4">
+              <VisualQueryBuilder
+                key={builderResetKey}
+                availableColumns={availableColumns}
+                availableModels={
+                  (visualModels || []).map((m: any) => m.model_name)
+                }
+                selectedSourceSchema={selectedSchema}
+                selectedSourceTable={selectedTable}
+                onSchemaChange={setSelectedSchema}
+                onTableChange={setSelectedTable}
+                onSave={handleVisualSave}
+                onPreview={handleVisualPreview}
+                isSaving={createVisualModel.isPending}
+              />
+              {codePreview.data && (
+                <CodePreview
+                  sql={codePreview.data.sql}
+                  yaml={codePreview.data.yaml}
+                  title="Generated dbt Code"
+                />
+              )}
+            </div>
+            <div>
+              <SchemaExplorer
+                onTableSelect={handleTableSelect}
+                maxHeight="700px"
+              />
             </div>
           </div>
-
-          {builderMode === 'sql' ? (
-            <div className="grid grid-cols-[1fr_360px] gap-4">
-              <div className="space-y-4">
-                <VisualQueryBuilder
-                  key={builderResetKey}
-                  availableColumns={availableColumns}
-                  availableModels={
-                    (visualModels || []).map((m: any) => m.model_name)
-                  }
-                  selectedSourceSchema={selectedSchema}
-                  selectedSourceTable={selectedTable}
-                  onSchemaChange={setSelectedSchema}
-                  onTableChange={setSelectedTable}
-                  onSave={handleVisualSave}
-                  onPreview={handleVisualPreview}
-                  isSaving={createVisualModel.isPending}
-                />
-                {codePreview.data && (
-                  <CodePreview
-                    sql={codePreview.data.sql}
-                    yaml={codePreview.data.yaml}
-                    title="Generated dbt Code"
-                  />
-                )}
-              </div>
-              <div>
-                <SchemaExplorer
-                  onTableSelect={handleTableSelect}
-                  maxHeight="700px"
-                />
-              </div>
-          </div>
-          ) : (
-            <div className="grid grid-cols-[1fr_360px] gap-4">
-              <div className="h-[600px]">
-                <ModelCanvas
-                  onSave={handleSaveModels}
-                  onValidate={handleValidateModels}
-                  onGenerateCode={(nodeId) => {
-                    navigate(`/app/dbt-studio/models/${nodeId}`)
-                  }}
-                />
-              </div>
-              <div>
-                <SchemaExplorer
-                  onTableSelect={handleTableSelect}
-                  maxHeight="700px"
-                />
-              </div>
-            </div>
-          )}
         </TabsContent>
 
         {/* ── Lineage ─────────────────────────────────────────────────── */}
@@ -599,34 +525,6 @@ export function EnhancedDbtStudioPage() {
             </div>
             <div>
               <TestResultsTable results={[]} />
-            </div>
-          </div>
-        </TabsContent>
-
-        {/* ── Execution Dashboard ─────────────────────────────────────── */}
-        <TabsContent value="execution">
-          <div className="grid grid-cols-[1fr_1fr] gap-4">
-            <div className="space-y-4">
-              <DbtCommandPanel
-                onExecute={(payload) => {
-                  toast({
-                    title: `dbt ${payload.command} submitted`,
-                    description: payload.selector
-                      ? `Selector: ${payload.selector}`
-                      : 'Running all models',
-                  })
-                }}
-              />
-              <LogViewer executionId={logExecutionId} />
-            </div>
-            <div>
-              <ExecutionHistory
-                executions={[]}
-                onViewLogs={(id) => setLogExecutionId(id)}
-                onCancel={(id) => {
-                  toast({ title: `Cancelling execution #${id}` })
-                }}
-              />
             </div>
           </div>
         </TabsContent>

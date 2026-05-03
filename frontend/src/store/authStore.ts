@@ -19,7 +19,12 @@ export interface AuthState {
   rememberMe: boolean
 
   // Actions
-  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>
+  login: (
+    email: string,
+    password: string,
+    rememberMe?: boolean,
+    tenantSlug?: string,
+  ) => Promise<void>
   register: (data: RegisterData) => Promise<void>
   logout: () => void
   refreshAuth: () => Promise<void>
@@ -42,10 +47,19 @@ export const useAuthStore = create<AuthState>()(
       rememberMe: false,
 
       // Login action
-      login: async (email: string, password: string, rememberMe = false) => {
+      login: async (
+        email: string,
+        password: string,
+        rememberMe = false,
+        tenantSlug?: string,
+      ) => {
         set({ isLoading: true, error: null })
         try {
-          const response: LoginResponse = await authService.login({ email, password })
+          const response: LoginResponse = await authService.login({
+            email,
+            password,
+            ...(tenantSlug ? { tenant_slug: tenantSlug } : {}),
+          })
           
           // Store access token only (refresh token is in HTTP-only cookie)
           authService.setTokens(response.access_token)
@@ -82,6 +96,7 @@ export const useAuthStore = create<AuthState>()(
           const loginResponse: LoginResponse = await authService.login({
             email: data.email,
             password: data.password,
+            tenant_slug: data.tenant_slug,
           })
 
           authService.setTokens(loginResponse.access_token)

@@ -2,7 +2,7 @@
  * ChartBuilderPage
  * 
  * Interactive chart builder for creating and editing charts.
- * Supports semantic model selection and query configuration.
+ * Supports dataset selection (canonical, mart-backed) and raw SQL.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -55,14 +55,7 @@ import type {
 import { chartService, ChartCreateRequest } from '@/services/chartService';
 import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/common';
-
-interface SemanticModel {
-  id: string;
-  name: string;
-  description?: string;
-  dimensions: string[];
-  measures: string[];
-}
+import { DatasetPicker, useDataset } from '@/features/datasets';
 
 const CHART_TYPES: Array<{ type: ChartType; label: string; icon: React.ElementType }> = [
   { type: 'bar', label: 'Bar', icon: BarChart3 },
@@ -103,8 +96,8 @@ export const ChartBuilderPage: React.FC = () => {
   const [chartName, setChartName] = useState('Untitled Chart');
   const [chartDescription, setChartDescription] = useState('');
   const [chartType, setChartType] = useState<ChartType>('bar');
-  const [sourceType, setSourceType] = useState<ChartSourceType>('semantic_model');
-  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [sourceType, setSourceType] = useState<ChartSourceType>('dataset');
+  const [selectedDatasetId, setSelectedDatasetId] = useState<string>('');
   const [sqlQuery, setSqlQuery] = useState('');
   const [queryConfig, setQueryConfig] = useState<ChartQueryConfig>(DEFAULT_QUERY_CONFIG);
   const [vizConfig, setVizConfig] = useState<ChartVizConfig>(DEFAULT_VIZ_CONFIG);
@@ -112,7 +105,6 @@ export const ChartBuilderPage: React.FC = () => {
   const [isPublic, setIsPublic] = useState(false);
 
   // UI state
-  const [semanticModels, setSemanticModels] = useState<SemanticModel[]>([]);
   const [previewData, setPreviewData] = useState<ChartData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -126,11 +118,6 @@ export const ChartBuilderPage: React.FC = () => {
     }
   }, [chartId]);
 
-  // Load semantic models
-  useEffect(() => {
-    loadSemanticModels();
-  }, []);
-
   const loadChart = async (id: string) => {
     setIsLoading(true);
     try {
@@ -139,7 +126,7 @@ export const ChartBuilderPage: React.FC = () => {
       setChartDescription(chart.description || '');
       setChartType(chart.chartType);
       setSourceType(chart.sourceType);
-      setSelectedModel(chart.semanticModelId || '');
+      setSelectedDatasetId(chart.datasetId || '');
       setQueryConfig(chart.queryConfig);
       setVizConfig(chart.vizConfig);
       setTags(chart.tags);
@@ -155,32 +142,11 @@ export const ChartBuilderPage: React.FC = () => {
     }
   };
 
-  const loadSemanticModels = async () => {
-    // TODO: Fetch actual semantic models from API
-    // For now, use mock data
-    setSemanticModels([
-      {
-        id: '1',
-        name: 'Sales Analytics',
-        description: 'Sales and revenue metrics',
-        dimensions: ['date', 'product_category', 'region', 'customer_segment'],
-        measures: ['total_revenue', 'order_count', 'avg_order_value', 'units_sold'],
-      },
-      {
-        id: '2',
-        name: 'Customer Analytics',
-        description: 'Customer behavior and segmentation',
-        dimensions: ['customer_id', 'signup_date', 'segment', 'country'],
-        measures: ['lifetime_value', 'total_orders', 'churn_score'],
-      },
-    ]);
-  };
-
   const handlePreview = async () => {
-    if (sourceType === 'semantic_model' && !selectedModel) {
+    if (sourceType === 'dataset' && !selectedDatasetId) {
       toast({
-        title: 'Select a Semantic Model',
-        description: 'Please select a semantic model to preview data',
+        title: 'Select a Dataset',
+        description: 'Please select a dataset to preview data',
         variant: 'destructive',
       });
       return;
@@ -199,7 +165,7 @@ export const ChartBuilderPage: React.FC = () => {
     try {
       const result = await chartService.preview({
         source_type: sourceType,
-        semantic_model_id: sourceType === 'semantic_model' ? selectedModel : undefined,
+        dataset_id: sourceType === 'dataset' ? selectedDatasetId : undefined,
         sql_query: sourceType === 'sql_query' ? sqlQuery : undefined,
         query_config: queryConfig,
         limit: 100,
@@ -243,7 +209,7 @@ export const ChartBuilderPage: React.FC = () => {
         description: chartDescription,
         chart_type: chartType,
         source_type: sourceType,
-        semantic_model_id: sourceType === 'semantic_model' ? selectedModel : undefined,
+        dataset_id: sourceType === 'dataset' ? selectedDatasetId : undefined,
         sql_query: sourceType === 'sql_query' ? sqlQuery : undefined,
         query_config: queryConfig,
         viz_config: vizConfig,
@@ -275,8 +241,6 @@ export const ChartBuilderPage: React.FC = () => {
       setIsSaving(false);
     }
   };
-
-  const selectedModelData = semanticModels.find(m => m.id === selectedModel);
 
   const toggleDimension = (dim: string) => {
     setQueryConfig(prev => ({
@@ -407,109 +371,20 @@ export const ChartBuilderPage: React.FC = () => {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="semantic_model">Semantic Model</SelectItem>
+                    <SelectItem value="dataset">Dataset (recommended)</SelectItem>
                     <SelectItem value="sql_query">SQL Query</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              {sourceType === 'semantic_model' ? (
-                <>
-                  {/* Semantic Model Selection */}
-                  <div className="space-y-2">
-                    <Label>Semantic Model</Label>
-                    <Select value={selectedModel} onValueChange={setSelectedModel}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a model..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {semanticModels.map((model) => (
-                          <SelectItem key={model.id} value={model.id}>
-                            {model.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {selectedModelData && (
-                    <>
-                      {/* Dimensions */}
-                      <Collapsible defaultOpen>
-                        <CollapsibleTrigger className="flex items-center justify-between w-full py-2">
-                          <Label className="flex items-center gap-2">
-                            <Columns className="h-4 w-4" />
-                            Dimensions
-                          </Label>
-                          <ChevronDown className="h-4 w-4" />
-                        </CollapsibleTrigger>
-                        <CollapsibleContent className="space-y-2">
-                          {selectedModelData.dimensions.map((dim) => (
-                            <div
-                              key={dim}
-                              onClick={() => toggleDimension(dim)}
-                              className={`
-                                flex items-center gap-2 p-2 rounded cursor-pointer transition-colors
-                                ${queryConfig.dimensions.includes(dim)
-                                  ? 'bg-blue-100 dark:bg-blue-900/30'
-                                  : 'hover:bg-gray-100 dark:hover:bg-gray-800'
-                                }
-                              `}
-                            >
-                              <div className={`
-                                w-4 h-4 rounded border flex items-center justify-center
-                                ${queryConfig.dimensions.includes(dim)
-                                  ? 'bg-blue-500 border-blue-500 text-white'
-                                  : 'border-gray-300'
-                                }
-                              `}>
-                                {queryConfig.dimensions.includes(dim) && '✓'}
-                              </div>
-                              <span className="text-sm">{dim}</span>
-                            </div>
-                          ))}
-                        </CollapsibleContent>
-                      </Collapsible>
-
-                      {/* Measures */}
-                      <Collapsible defaultOpen>
-                        <CollapsibleTrigger className="flex items-center justify-between w-full py-2">
-                          <Label className="flex items-center gap-2">
-                            <BarChart3 className="h-4 w-4" />
-                            Measures
-                          </Label>
-                          <ChevronDown className="h-4 w-4" />
-                        </CollapsibleTrigger>
-                        <CollapsibleContent className="space-y-2">
-                          {selectedModelData.measures.map((measure) => (
-                            <div
-                              key={measure}
-                              onClick={() => toggleMeasure(measure)}
-                              className={`
-                                flex items-center gap-2 p-2 rounded cursor-pointer transition-colors
-                                ${queryConfig.measures.includes(measure)
-                                  ? 'bg-green-100 dark:bg-green-900/30'
-                                  : 'hover:bg-gray-100 dark:hover:bg-gray-800'
-                                }
-                              `}
-                            >
-                              <div className={`
-                                w-4 h-4 rounded border flex items-center justify-center
-                                ${queryConfig.measures.includes(measure)
-                                  ? 'bg-green-500 border-green-500 text-white'
-                                  : 'border-gray-300'
-                                }
-                              `}>
-                                {queryConfig.measures.includes(measure) && '✓'}
-                              </div>
-                              <span className="text-sm">{measure}</span>
-                            </div>
-                          ))}
-                        </CollapsibleContent>
-                      </Collapsible>
-                    </>
-                  )}
-                </>
+              {sourceType === 'dataset' ? (
+                <DatasetSourcePanel
+                  datasetId={selectedDatasetId}
+                  onDatasetChange={(id) => setSelectedDatasetId(id)}
+                  queryConfig={queryConfig}
+                  onToggleDimension={toggleDimension}
+                  onToggleMeasure={toggleMeasure}
+                />
               ) : (
                 /* SQL Query Input */
                 <div className="space-y-2">
@@ -693,6 +568,154 @@ export const ChartBuilderPage: React.FC = () => {
           )}
         </div>
       </div>
+    </div>
+  );
+};
+
+// =============================================================================
+// Dataset source panel — Superset-style explore left rail when sourcing from
+// a Dataset. Renders dimensions from `dataset.columns` (groupby=true) and
+// metrics from `dataset.metrics`. Falls back to all visible columns as
+// pseudo-measures when no metrics are defined.
+// =============================================================================
+
+interface DatasetSourcePanelProps {
+  datasetId: string;
+  onDatasetChange: (id: string) => void;
+  queryConfig: ChartQueryConfig;
+  onToggleDimension: (name: string) => void;
+  onToggleMeasure: (name: string) => void;
+}
+
+const DatasetSourcePanel: React.FC<DatasetSourcePanelProps> = ({
+  datasetId,
+  onDatasetChange,
+  queryConfig,
+  onToggleDimension,
+  onToggleMeasure,
+}) => {
+  const { data: dataset } = useDataset(datasetId || undefined);
+
+  const dimensionCols = (dataset?.columns ?? []).filter(
+    (c) => c.groupby && !c.is_hidden,
+  );
+  const metricList = dataset?.metrics ?? [];
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <Label>Dataset</Label>
+        <DatasetPicker
+          value={datasetId || null}
+          onChange={(id) => onDatasetChange(id)}
+          onClear={() => onDatasetChange('')}
+        />
+      </div>
+
+      {dataset && (
+        <>
+          <Collapsible defaultOpen>
+            <CollapsibleTrigger className="flex items-center justify-between w-full py-2">
+              <Label className="flex items-center gap-2">
+                <Columns className="h-4 w-4" />
+                Dimensions ({dimensionCols.length})
+              </Label>
+              <ChevronDown className="h-4 w-4" />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-1">
+              {dimensionCols.length === 0 && (
+                <p className="text-xs text-muted-foreground p-2">
+                  No groupable columns.
+                </p>
+              )}
+              {dimensionCols.map((c) => {
+                const sel = queryConfig.dimensions.includes(c.column_name);
+                return (
+                  <div
+                    key={c.column_name}
+                    onClick={() => onToggleDimension(c.column_name)}
+                    className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
+                      sel
+                        ? 'bg-blue-100 dark:bg-blue-900/30'
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                    }`}
+                  >
+                    <div
+                      className={`w-4 h-4 rounded border flex items-center justify-center ${
+                        sel
+                          ? 'bg-blue-500 border-blue-500 text-white'
+                          : 'border-gray-300'
+                      }`}
+                    >
+                      {sel && '✓'}
+                    </div>
+                    <span className="text-sm flex-1 truncate">
+                      {c.verbose_name || c.column_name}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      {c.type}
+                    </span>
+                  </div>
+                );
+              })}
+            </CollapsibleContent>
+          </Collapsible>
+
+          <Collapsible defaultOpen>
+            <CollapsibleTrigger className="flex items-center justify-between w-full py-2">
+              <Label className="flex items-center gap-2">
+                <BarChart3 className="h-4 w-4" />
+                Metrics ({metricList.length})
+              </Label>
+              <ChevronDown className="h-4 w-4" />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-1">
+              {metricList.length === 0 && (
+                <p className="text-xs text-muted-foreground p-2">
+                  No metrics defined.{' '}
+                  <a
+                    href={`/app/datasets/${dataset.id}`}
+                    className="underline"
+                  >
+                    Define metrics
+                  </a>{' '}
+                  on the dataset to reuse them across charts.
+                </p>
+              )}
+              {metricList.map((m) => {
+                const sel = queryConfig.measures.includes(m.metric_name);
+                return (
+                  <div
+                    key={m.metric_name}
+                    onClick={() => onToggleMeasure(m.metric_name)}
+                    className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
+                      sel
+                        ? 'bg-green-100 dark:bg-green-900/30'
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                    }`}
+                  >
+                    <div
+                      className={`w-4 h-4 rounded border flex items-center justify-center ${
+                        sel
+                          ? 'bg-green-500 border-green-500 text-white'
+                          : 'border-gray-300'
+                      }`}
+                    >
+                      {sel && '✓'}
+                    </div>
+                    <span className="text-sm flex-1 truncate">
+                      {m.verbose_name || m.metric_name}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[100px]">
+                      {m.expression}
+                    </span>
+                  </div>
+                );
+              })}
+            </CollapsibleContent>
+          </Collapsible>
+        </>
+      )}
     </div>
   );
 };

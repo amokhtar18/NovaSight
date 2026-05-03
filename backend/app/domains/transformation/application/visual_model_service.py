@@ -310,11 +310,96 @@ class VisualModelService:
         )
         return get_clickhouse_client(tenant_id=tenant_id)
 
+    # ClickHouse internal databases that should never appear as a dbt source
+    # in the SQL Builder. The ``novasight_system`` DB is our own platform
+    # bookkeeping schema (audit logs, etc.), not analytical data.
+    _CLICKHOUSE_SYSTEM_DATABASES = frozenset({
+        "system",
+        "information_schema",
+        "INFORMATION_SCHEMA",
+        "default",
+        "novasight_system",
+    })
+
     def list_warehouse_schemas(self, tenant_id: str) -> List[Dict]:
-        """Query ClickHouse for available databases/schemas."""
+        """Query ClickHouse for analytical databases/schemas.
+
+        Returns every database visible to the tenant connection that is
+        usable as a dbt source/destination, excluding ClickHouse's own
+        system databases. This includes:
+
+        * ``tenant_<slug>``        — the tenant's primary warehouse DB
+        * ``tenant_<slug>_staging`` — dbt staging layer (materialized as
+          views by ``dbt-clickhouse`` when ``+schema: staging`` is set)
+        * ``tenant_<slug>_intermediate`` — intermediate layer if any
+          model overrides ``+materialized: ephemeral`` to a real layer
+        * ``tenant_<slug>_marts``  — dbt marts layer
+
+        We also surface the canonical dbt-generated schemas (``_staging``,
+        ``_marts``) for the current tenant *even if they don't yet exist
+        as ClickHouse databases* — they are created lazily on the first
+        ``dbt run`` that materializes a model into them, and showing them
+        up-front lets analysts compose models that reference them without
+        having to wait for the first refresh.
+        """
+        from app.domains.tenants.domain.models import Tenant
+
         client = self._get_clickhouse_client(tenant_id)
-        result = client.execute("SHOW DATABASES")
-        return [{"name": row[0]} for row in result.rows]
+        try:
+            result = client.execute("SHOW DATABASES")
+            existing = [row[0] for row in result.rows]
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("SHOW DATABASES failed for tenant %s: %s", tenant_id, exc)
+            existing = []
+
+        # Filter out CH internals.
+        visible = [
+            name for name in existing
+            if name not in self._CLICKHOUSE_SYSTEM_DATABASES
+        ]
+
+        # Resolve the tenant's base DB so we can synthesize the canonical
+        # dbt layer schemas if they don't physically exist yet.
+        tenant = Tenant.query.get(tenant_id)
+        base = None
+        if tenant and tenant.slug:
+            safe_slug = tenant.slug.replace("-", "_").replace(".", "_").lower()
+            base = f"tenant_{safe_slug}"
+        elif tenant_id:
+            base = f"tenant_{str(tenant_id).replace('-', '_')}"
+
+        # Always include the canonical dbt-generated schemas so they show
+        # up in the dropdown even before the first dbt run materializes
+        # anything into them. We tag each entry with its layer so the UI
+        # can group them.
+        synthesized: List[str] = []
+        if base:
+            for layer_suffix in ("", "_staging", "_intermediate", "_marts"):
+                synthesized.append(f"{base}{layer_suffix}")
+
+        # Merge: preserve existing order, append synthesized ones the
+        # warehouse hasn't materialized yet.
+        seen: set = set()
+        ordered: List[str] = []
+        for name in visible + synthesized:
+            if name not in seen:
+                seen.add(name)
+                ordered.append(name)
+
+        def _classify(name: str) -> Dict[str, Any]:
+            exists = name in existing
+            layer = "raw"
+            if base and name == f"{base}_staging":
+                layer = "staging"
+            elif base and name == f"{base}_intermediate":
+                layer = "intermediate"
+            elif base and name == f"{base}_marts":
+                layer = "marts"
+            elif base and name == base:
+                layer = "warehouse"
+            return {"name": name, "layer": layer, "exists": exists}
+
+        return [_classify(n) for n in ordered]
 
     def list_warehouse_tables(
         self, tenant_id: str, schema: str

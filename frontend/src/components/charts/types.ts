@@ -16,7 +16,7 @@ export type ChartType =
   | 'treemap'
   | 'funnel';
 
-export type ChartSourceType = 'semantic_model' | 'sql_query';
+export type ChartSourceType = 'sql_query' | 'dataset';
 
 export interface ChartDataColumn {
   name: string;
@@ -88,7 +88,7 @@ export interface ChartConfig {
   description?: string;
   chartType: ChartType;
   sourceType: ChartSourceType;
-  semanticModelId?: string;
+  datasetId?: string;
   sqlQuery?: string;
   queryConfig: ChartQueryConfig;
   vizConfig: ChartVizConfig;
@@ -103,7 +103,7 @@ export interface Chart {
   description?: string;
   chartType: ChartType;
   sourceType: ChartSourceType;
-  semanticModelId?: string;
+  datasetId?: string;
   queryConfig: ChartQueryConfig;
   vizConfig: ChartVizConfig;
   folderId?: string;

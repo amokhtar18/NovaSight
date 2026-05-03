@@ -189,7 +189,13 @@ class ProvisioningService:
             # Drop the database
             drop_sql = f"DROP DATABASE IF EXISTS {db_name}"
             client.execute(drop_sql)
-            
+
+            # Drop per-layer dbt databases (created alongside the main
+            # tenant database in tenant_database.sql.j2). Safe even if
+            # they were never created.
+            for layer in ("staging", "intermediate", "marts"):
+                client.execute(f"DROP DATABASE IF EXISTS {db_name}_{layer}")
+
             logger.info(
                 "Dropped ClickHouse database for tenant: %s (force=%s)",
                 tenant.slug, force

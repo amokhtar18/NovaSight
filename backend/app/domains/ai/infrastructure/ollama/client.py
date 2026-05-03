@@ -352,23 +352,90 @@ class OllamaClient:
         await self.close()
 
 
-def get_ollama_client(
-    base_url: Optional[str] = None,
-    model: Optional[str] = None
-) -> OllamaClient:
+def _resolve_ollama_settings(
+    tenant_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """
-    Factory function to create OllamaClient from Flask config.
-    
-    Args:
-        base_url: Override config base URL
-        model: Override config model
-    
-    Returns:
-        Configured OllamaClient instance
+    Resolve Ollama settings with the following precedence:
+
+    1. Active ``InfrastructureConfig`` row for ``ollama`` (tenant → global
+       fallback handled by the service).
+    2. Flask app config / environment variables.
+    3. Hard-coded defaults.
+
+    The DB-backed infrastructure configuration therefore *overrides* any
+    ``OLLAMA_BASE_URL`` / ``OLLAMA_MODEL`` env vars whenever an admin has
+    saved a config through ``/api/v1/admin/infrastructure``.
     """
     from flask import current_app
-    
+
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    timeout: Optional[float] = None
+
+    try:
+        from app.domains.tenants.infrastructure.config_service import (
+            InfrastructureConfigService,
+        )
+
+        service = InfrastructureConfigService()
+        cfg = service.get_active_config("ollama", tenant_id)
+        if cfg is not None:
+            settings = dict(cfg.settings or {})
+            # Prefer explicit base_url, otherwise compose from host/port.
+            base_url = settings.get("base_url") or (
+                f"http://{cfg.host}:{cfg.port}"
+                if cfg.host and cfg.port
+                else None
+            )
+            model = settings.get("default_model")
+            req_timeout = settings.get("request_timeout")
+            if req_timeout is not None:
+                try:
+                    timeout = float(req_timeout)
+                except (TypeError, ValueError):
+                    timeout = None
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug(
+            "Falling back to env-based Ollama config (%s)", exc
+        )
+
+    if not base_url:
+        base_url = current_app.config.get(
+            "OLLAMA_BASE_URL", "http://localhost:11434"
+        )
+    if not model:
+        model = current_app.config.get("OLLAMA_MODEL", "llama3.2")
+    if timeout is None:
+        timeout = float(
+            current_app.config.get("OLLAMA_REQUEST_TIMEOUT", 120.0)
+        )
+
+    return {"base_url": base_url, "model": model, "timeout": timeout}
+
+
+def get_ollama_client(
+    base_url: Optional[str] = None,
+    model: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> OllamaClient:
+    """
+    Factory function to create OllamaClient.
+
+    Resolution order:
+        explicit args > InfrastructureConfig (DB) > Flask config / env > defaults
+
+    Args:
+        base_url: Hard override for the Ollama base URL.
+        model: Hard override for the default model.
+        tenant_id: Optional tenant scope when looking up the DB config.
+
+    Returns:
+        Configured OllamaClient instance.
+    """
+    settings = _resolve_ollama_settings(tenant_id=tenant_id)
     return OllamaClient(
-        base_url=base_url or current_app.config.get('OLLAMA_BASE_URL', 'http://localhost:11434'),
-        model=model or current_app.config.get('OLLAMA_MODEL', 'llama3.2')
+        base_url=base_url or settings["base_url"],
+        model=model or settings["model"],
+        timeout=settings["timeout"],
     )

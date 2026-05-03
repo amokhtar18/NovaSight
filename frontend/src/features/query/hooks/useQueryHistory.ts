@@ -18,7 +18,7 @@ export function useQueryHistory() {
     queryKey: ['query-history'],
     queryFn: async () => {
       try {
-        const response = await api.get<QueryHistoryItem[]>('/assistant/history')
+        const response = await api.get<QueryHistoryItem[]>('/api/v1/assistant/history')
         return response.data
       } catch {
         // Fallback to local storage if API not available
@@ -32,7 +32,7 @@ export function useQueryHistory() {
   const deleteMutation = useMutation({
     mutationFn: async (historyId: string) => {
       try {
-        await api.delete(`/assistant/history/${historyId}`)
+        await api.delete(`/api/v1/assistant/history/${historyId}`)
       } catch {
         // Remove from local storage as fallback
         removeFromLocalHistory(historyId)
@@ -47,7 +47,7 @@ export function useQueryHistory() {
   const clearMutation = useMutation({
     mutationFn: async () => {
       try {
-        await api.delete('/assistant/history')
+        await api.delete('/api/v1/assistant/history')
       } catch {
         clearLocalHistory()
       }

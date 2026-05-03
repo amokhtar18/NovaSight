@@ -65,7 +65,7 @@ SELECT
 {% endif %}
 {% endfor %}
 FROM {{ primary_alias }}
-{% if joins is defined and joins | length > 0 %}
+{% if joins and joins | length > 0 %}
 {% for join in joins %}
 {{ join.type | default('LEFT') | upper }} JOIN {{ join.model_alias | default(join.model | replace('stg_', '') | replace('int_', '')) }}
     ON {{ primary_alias }}.{{ join.left_key }} = {{ join.model_alias | default(join.model | replace('stg_', '') | replace('int_', '')) }}.{{ join.right_key }}
@@ -77,7 +77,7 @@ FROM {{ primary_alias }}
 {% if where_clause is defined and where_clause %}
 WHERE {{ where_clause }}
 {% endif %}
-{% if group_by is defined and group_by | length > 0 %}
+{% if group_by and group_by | length > 0 %}
 GROUP BY
 {% for col in group_by %}
     {{ col }}{% if not loop.last %},{% endif %}

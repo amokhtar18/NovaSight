@@ -8,6 +8,15 @@ from app.domains.analytics.domain.chart_models import (
     ChartSourceType,
     DashboardChart,
 )
+from app.domains.analytics.domain.dataset_models import (
+    Dataset,
+    DatasetColumn,
+    DatasetMetric,
+    DatasetKind,
+    DatasetSource,
+    DbtMaterialization,
+    MATERIALIZED_DBT_TYPES,
+)
 
 __all__ = [
     # Dashboard models
@@ -20,4 +29,12 @@ __all__ = [
     "ChartType",
     "ChartSourceType",
     "DashboardChart",
+    # Dataset models (Superset-inspired)
+    "Dataset",
+    "DatasetColumn",
+    "DatasetMetric",
+    "DatasetKind",
+    "DatasetSource",
+    "DbtMaterialization",
+    "MATERIALIZED_DBT_TYPES",
 ]

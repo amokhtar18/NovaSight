@@ -198,8 +198,8 @@ services:
   # ============================================
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: backend/Dockerfile.dev
     container_name: novasight-backend
     restart: unless-stopped
     ports:

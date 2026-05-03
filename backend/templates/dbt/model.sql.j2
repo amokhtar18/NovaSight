@@ -96,7 +96,7 @@ WITH source_data AS (
 )
 
 {% endif %}
-{% if columns is defined and columns | length > 0 %}
+{% if columns and columns | length > 0 %}
 SELECT
 {% for column in columns %}
 {% if column.expression is defined and column.expression %}

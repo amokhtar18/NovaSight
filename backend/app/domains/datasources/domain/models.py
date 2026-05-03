@@ -243,13 +243,41 @@ class DataConnection(TenantMixin, TimestampMixin, db.Model):
         """Generate SQLAlchemy connection string."""
         dialect_map = {
             DatabaseType.POSTGRESQL: "postgresql+psycopg2",
-            DatabaseType.ORACLE: "oracle+cx_oracle",
+            DatabaseType.ORACLE: "oracle+oracledb",
             DatabaseType.SQLSERVER: "mssql+pyodbc",
             DatabaseType.MYSQL: "mysql+pymysql",
             DatabaseType.CLICKHOUSE: "clickhouse+native",
         }
 
         dialect = dialect_map.get(self.db_type, "postgresql+psycopg2")
+
+        # Oracle requires special handling: SQLAlchemy's oracle+oracledb URL
+        # treats the path component as service_name (Easy Connect format).
+        # If the user stored an SID in `database` and provided `service_name`
+        # in extra_params, we must route those correctly.
+        if self.db_type == DatabaseType.ORACLE:
+            extra = self.extra_params or {}
+            service_name = extra.get("service_name")
+            query_parts: list[str] = []
+            if service_name:
+                # Use service_name from extra_params; treat `database` as SID
+                # only if it was meant to be one (we honor the explicit
+                # service_name and ignore `database` here to avoid ambiguity).
+                path = service_name
+            else:
+                # No explicit service_name → treat `database` as service_name
+                # (Easy Connect default for oracle+oracledb).
+                path = self.database
+            base_url = (
+                f"{dialect}://{self.username}:{password}"
+                f"@{self.host}:{self.port}/{path}"
+            )
+            if self.ssl_mode:
+                query_parts.append(f"sslmode={self.ssl_mode}")
+            if query_parts:
+                base_url += "?" + "&".join(query_parts)
+            return base_url
+
         base_url = f"{dialect}://{self.username}:{password}@{self.host}:{self.port}/{self.database}"
 
         # Add SSL mode if specified

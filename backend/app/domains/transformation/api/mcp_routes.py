@@ -1202,6 +1202,134 @@ def get_project_file():
         raise NovaSightException(f"Failed to read file: {e}")
 
 
+@api_v1_bp.route('/dbt/project/file', methods=['PUT'])
+@authenticated
+@tenant_required
+@require_roles(['super_admin', 'tenant_admin', 'data_engineer'])
+def update_project_file():
+    """
+    Update (overwrite) a file in the tenant's dbt project.
+
+    Allowed only for files under ``models/``, ``tests/``, ``snapshots/``,
+    ``seeds/``, ``macros/`` and ``analyses/`` with safe text extensions.
+
+    ---
+    tags:
+      - dbt-project
+    security:
+      - BearerAuth: []
+    parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Path relative to the project root.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [content]
+            properties:
+              content:
+                type: string
+                description: New file contents (UTF-8 text).
+    responses:
+      200:
+        description: File written
+      400:
+        description: Invalid path, protected location, or oversized payload
+    """
+    from app.domains.transformation.infrastructure.tenant_dbt_project import (
+        get_tenant_project_manager,
+        TenantDbtProjectError,
+    )
+
+    file_path = request.args.get('path')
+    if not file_path:
+        raise ValidationError("File path required", details={"field": "path"})
+
+    payload = request.get_json(silent=True) or {}
+    if "content" not in payload:
+        raise ValidationError(
+            "File content required", details={"field": "content"}
+        )
+    content = payload.get("content")
+    if not isinstance(content, str):
+        raise ValidationError(
+            "File content must be a string", details={"field": "content"}
+        )
+
+    try:
+        manager = get_tenant_project_manager()
+        result = manager.write_file(file_path, content)
+        return jsonify({"success": True, **result}), 200
+
+    except TenantDbtProjectError as e:
+        msg = str(e)
+        logger.warning("Refused dbt file write (%s): %s", file_path, msg)
+        raise NovaSightException(msg, status_code=400)
+
+
+@api_v1_bp.route('/dbt/project/file', methods=['DELETE'])
+@authenticated
+@tenant_required
+@require_roles(['super_admin', 'tenant_admin', 'data_engineer'])
+def delete_project_file():
+    """
+    Delete a file (dbt model, test, snapshot, seed, macro, or analysis)
+    from the tenant's dbt project.
+
+    For ``.sql`` model files, the paired schema YAML (``_<name>.yml``) in
+    the same directory is also removed when present.
+
+    ---
+    tags:
+      - dbt-project
+    security:
+      - BearerAuth: []
+    parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+        description: |
+          Path relative to the project root. Must live under one of:
+          ``models/``, ``tests/``, ``snapshots/``, ``seeds/``,
+          ``macros/``, ``analyses/``.
+    responses:
+      200:
+        description: File(s) deleted
+      400:
+        description: Invalid path or protected location
+      404:
+        description: File not found
+    """
+    from app.domains.transformation.infrastructure.tenant_dbt_project import (
+        get_tenant_project_manager,
+        TenantDbtProjectError,
+    )
+
+    file_path = request.args.get('path')
+    if not file_path:
+        raise ValidationError("File path required", details={"field": "path"})
+
+    try:
+        manager = get_tenant_project_manager()
+        result = manager.delete_file(file_path)
+        return jsonify({"success": True, **result}), 200
+
+    except TenantDbtProjectError as e:
+        msg = str(e)
+        logger.warning("Refused dbt file delete (%s): %s", file_path, msg)
+        # Surface "not found" as 404, validation errors as 400.
+        status = 404 if "not found" in msg.lower() else 400
+        raise NovaSightException(msg, status_code=status)
+
+
 @api_v1_bp.route('/dbt/project/models', methods=['GET'])
 @authenticated
 @tenant_required

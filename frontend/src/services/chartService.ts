@@ -34,7 +34,7 @@ export interface ChartCreateRequest {
   description?: string;
   chart_type: ChartType;
   source_type: ChartSourceType;
-  semantic_model_id?: string;
+  dataset_id?: string;
   sql_query?: string;
   query_config: ChartQueryConfig;
   viz_config: ChartVizConfig;
@@ -48,7 +48,7 @@ export interface ChartUpdateRequest {
   description?: string;
   chart_type?: ChartType;
   source_type?: ChartSourceType;
-  semantic_model_id?: string;
+  dataset_id?: string;
   sql_query?: string;
   query_config?: ChartQueryConfig;
   viz_config?: ChartVizConfig;
@@ -77,7 +77,7 @@ export interface ChartDataResponse {
 
 export interface ChartPreviewRequest {
   source_type: ChartSourceType;
-  semantic_model_id?: string;
+  dataset_id?: string;
   sql_query?: string;
   query_config?: ChartQueryConfig;
   limit?: number;
@@ -117,7 +117,7 @@ function novaToSuperset(payload: ChartCreateRequest | ChartUpdateRequest): Recor
     description: payload.description,
     chart_type: payload.chart_type,
     source_type: payload.source_type,
-    semantic_model_id: payload.semantic_model_id,
+    dataset_id: payload.dataset_id,
     sql_query: payload.sql_query,
     query_config: payload.query_config,
     viz_config: payload.viz_config,
@@ -138,8 +138,8 @@ function supersetToNova(raw: Record<string, unknown>): Chart {
     name: String(raw.name || ''),
     description: (raw.description as string) || undefined,
     chartType: (raw.chart_type as ChartType) || 'table',
-    sourceType: (raw.source_type as ChartSourceType) || 'semantic_model',
-    semanticModelId: (raw.semantic_model_id as string) || undefined,
+    sourceType: (raw.source_type as ChartSourceType) || 'dataset',
+    datasetId: (raw.dataset_id as string) || undefined,
     queryConfig,
     vizConfig,
     folderId: (raw.folder_id as string) || undefined,

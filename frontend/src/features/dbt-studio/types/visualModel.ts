@@ -187,8 +187,33 @@ export interface DagResponse {
 // Warehouse Introspection
 // ============================================================================
 
+/**
+ * Layer classification for a ClickHouse schema in dbt Studio.
+ *
+ * - ``warehouse``    → tenant's primary DB (raw/landed analytical data)
+ * - ``staging``      → dbt staging layer  (``+schema: staging``)
+ * - ``intermediate`` → dbt intermediate layer
+ * - ``marts``        → dbt marts layer    (``+schema: marts``)
+ * - ``raw``          → any other DB visible to the tenant connection
+ */
+export type WarehouseSchemaLayer =
+  | 'warehouse'
+  | 'staging'
+  | 'intermediate'
+  | 'marts'
+  | 'raw'
+
 export interface WarehouseSchema {
   name: string
+  /** Layer classification (returned by the backend). */
+  layer?: WarehouseSchemaLayer
+  /**
+   * ``true`` if the database currently exists in ClickHouse.
+   * dbt-generated schemas (`_staging`, `_marts`) are surfaced eagerly
+   * even before the first ``dbt run`` materializes them, so the UI
+   * can render a "not materialized yet" hint.
+   */
+  exists?: boolean
 }
 
 export interface WarehouseTable {

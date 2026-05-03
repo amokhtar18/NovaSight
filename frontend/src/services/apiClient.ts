@@ -63,9 +63,22 @@ class ApiClient {
   }
 
   private setupInterceptors() {
-    // Request interceptor - add auth token
+    // Request interceptor - add auth token + normalize API prefix
     this.client.interceptors.request.use(
       (config: InternalAxiosRequestConfig) => {
+        // Auto-prepend /api/v1 to relative paths that don't already have it.
+        // This lets call-sites use either '/dashboards' or '/api/v1/dashboards'
+        // interchangeably without producing 404s. External URLs (with a
+        // scheme) and paths that already start with /api/ are left alone.
+        if (
+          config.url &&
+          config.url.startsWith('/') &&
+          !config.url.startsWith('/api/') &&
+          !/^https?:\/\//i.test(config.url)
+        ) {
+          config.url = `/api/v1${config.url}`
+        }
+
         const token = authService.getAccessToken()
         if (token) {
           config.headers.Authorization = `Bearer ${token}`

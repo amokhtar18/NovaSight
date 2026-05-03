@@ -132,11 +132,49 @@ def build_pipeline_env(
             env["FILE_FORMAT"] = pipeline.file_format or ""
             env["FILE_OPTIONS_JSON"] = json.dumps(pipeline.file_options or {})
         elif pipeline.connection_id:
-            conn_service = ConnectionService()
+            conn_service = ConnectionService(tenant_id=tenant_id)
             connection = conn_service.get_connection(str(pipeline.connection_id))
             if connection:
-                env["SOURCE_CONNECTION_STRING"] = conn_service.get_connection_string(
-                    str(pipeline.connection_id)
+                # Decrypt the stored password and ask the model to build a
+                # fully-qualified SQLAlchemy URL (with ``drivername``) — dlt's
+                # sql_database/sql_table credentials parser fails with
+                # "Following fields are missing: ['drivername']" if we hand
+                # it an empty or scheme-less string.
+                from urllib.parse import quote_plus
+
+                password = conn_service._encryption.decrypt(
+                    connection.password_encrypted
+                ) or ""
+                env["SOURCE_CONNECTION_STRING"] = connection.get_connection_string(
+                    password=quote_plus(password)
+                )
+
+                # --- Oracle thick-mode / Instant Client passthrough ---
+                # The generated pipeline runs as a subprocess and creates
+                # its own SQLAlchemy engine, bypassing OracleConnector. To
+                # keep behavior consistent with the saved connection's
+                # extra_params, propagate Oracle-specific flags as env vars
+                # that the templates read at startup.
+                from app.domains.datasources.domain.models import DatabaseType
+                if connection.db_type == DatabaseType.ORACLE:
+                    extra = connection.extra_params or {}
+                    # Default to thick mode for Oracle: most enterprise
+                    # servers reject thin mode (DPY-3010). Users can opt
+                    # out by setting extra_params.thick_mode = false.
+                    thick = extra.get("thick_mode")
+                    if thick is None:
+                        thick = True
+                    env["ORACLE_THICK_MODE"] = "1" if thick else "0"
+                    if instant_client_dir := extra.get("instant_client_dir"):
+                        env["ORACLE_INSTANT_CLIENT_DIR"] = str(instant_client_dir)
+                    if wallet_location := extra.get("wallet_location"):
+                        env["ORACLE_WALLET_LOCATION"] = str(wallet_location)
+                    if wallet_password := extra.get("wallet_password"):
+                        env["ORACLE_WALLET_PASSWORD"] = str(wallet_password)
+            else:
+                _warn(
+                    f"Pipeline {pipeline_id} references missing connection "
+                    f"{pipeline.connection_id}; SOURCE_CONNECTION_STRING not set"
                 )
 
     except Exception as exc:

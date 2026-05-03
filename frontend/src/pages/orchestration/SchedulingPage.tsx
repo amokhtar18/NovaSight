@@ -20,7 +20,6 @@ import { pipelineService } from '@/services/pipelineService'
 import type { Pipeline } from '@/types/pipeline'
 import {
   AssetGraph,
-  ScheduleList,
   SensorList,
   InstanceStatus,
 } from '@/components/dagster'
@@ -92,7 +91,7 @@ import { getStatusClasses } from '@/lib/colors'
 // Types
 // =============================================================================
 
-type EntityType = 'pipeline' | 'dbt'
+type EntityType = 'pipeline' | 'dbt_run' | 'dbt_test'
 
 interface UnifiedRow {
   id: string                  // Stable row id (pipeline id or job id)
@@ -116,7 +115,8 @@ export function SchedulingPage() {
   const queryClient = useQueryClient()
   const [deleteTarget, setDeleteTarget] = useState<Job | null>(null)
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [typeFilter, setTypeFilter] = useState<string>('all')
+  // typeFilter is preserved for jobService.list filter shape (no UI control any more)
+  const [typeFilter] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedAssetKey, setSelectedAssetKey] = useState<string[] | null>(null)
 
@@ -161,20 +161,12 @@ export function SchedulingPage() {
     refetchInterval: 30000,
   })
 
-  const { data: sensors } = useQuery({
-    queryKey: ['dagster-sensors'],
-    queryFn: () => dagsterService.getSensors(),
-    refetchInterval: 30000,
-  })
-
   // ── Stats ───────────────────────────────────────────────────────────────
   const runningCount = runs?.filter((r) => r.status === 'running').length || 0
   const queuedCount = runs?.filter((r) => r.status === 'queued').length || 0
   const recentFailures = runs?.filter((r) => r.status === 'failed').length || 0
   const activeSchedules =
     schedules?.filter((s) => s.scheduleState?.status === 'RUNNING').length || 0
-  const activeSensors =
-    sensors?.filter((s) => s.sensorState?.status === 'RUNNING').length || 0
 
   // ── Mutations ───────────────────────────────────────────────────────────
   const triggerMutation = useMutation({
@@ -297,14 +289,15 @@ export function SchedulingPage() {
       })
     }
 
-    // 2) Standalone dbt jobs (no pipeline binding)
+    // 2) Standalone dbt jobs (no pipeline binding) split by kind
     for (const j of jobs) {
       if (j.type !== 'dbt') continue
+      const isTest = j.tags.includes('dbt_test')
       rows.push({
         id: j.id,
         name: j.dag_id,
         description: j.description,
-        entityType: 'dbt',
+        entityType: isTest ? 'dbt_test' : 'dbt_run',
         job: j,
         source: j.dag_id,
         scheduleLabel: getScheduleDisplay(j),
@@ -324,7 +317,12 @@ export function SchedulingPage() {
     return unifiedRows.filter((r) => {
       if (typeFilter !== 'all') {
         if (typeFilter === 'pipeline' && r.entityType !== 'pipeline') return false
-        if (typeFilter === 'dbt' && r.entityType !== 'dbt') return false
+        if (
+          typeFilter === 'dbt' &&
+          r.entityType !== 'dbt_run' &&
+          r.entityType !== 'dbt_test'
+        )
+          return false
       }
       if (statusFilter !== 'all') {
         if (statusFilter === 'scheduled' && !r.isScheduled) return false
@@ -341,46 +339,32 @@ export function SchedulingPage() {
     })
   }, [unifiedRows, searchQuery, typeFilter, statusFilter])
 
+  // Split rows by sub-tab (pipelines / dbt models / dbt tests)
+  const pipelineRows = useMemo(
+    () => filteredRows.filter((r) => r.entityType === 'pipeline'),
+    [filteredRows],
+  )
+  const dbtModelRows = useMemo(
+    () => filteredRows.filter((r) => r.entityType === 'dbt_run'),
+    [filteredRows],
+  )
+  const dbtTestRows = useMemo(
+    () => filteredRows.filter((r) => r.entityType === 'dbt_test'),
+    [filteredRows],
+  )
+
+  // Schedules tab: every row in our system (pipeline / dbt run / dbt test) that
+  // has an active schedule, regardless of the items-tab filters.
+  const scheduledRows = useMemo(
+    () => unifiedRows.filter((r) => r.isScheduled),
+    [unifiedRows],
+  )
+
   const isLoading = jobsLoading || pipelinesLoading
 
   const refetchAll = () => {
     refetchJobs()
     refetchPipelines()
-  }
-
-  // ── Render helpers ──────────────────────────────────────────────────────
-  const renderTypeBadge = (type: EntityType) => {
-    if (type === 'pipeline') {
-      return (
-        <Badge variant="outline" className="border-purple-400 text-purple-600">
-          <GitBranch className="mr-1 h-3 w-3" />
-          Pipeline
-        </Badge>
-      )
-    }
-    return (
-      <Badge variant="outline" className="border-blue-400 text-blue-600">
-        <Code2 className="mr-1 h-3 w-3" />
-        dbt
-      </Badge>
-    )
-  }
-
-  const renderStatusBadge = (row: UnifiedRow) => {
-    if (row.status === 'no-schedule') {
-      return (
-        <Badge variant="outline" className="text-muted-foreground">
-          <CalendarOff className="mr-1 h-3 w-3" />
-          Not scheduled
-        </Badge>
-      )
-    }
-    const cls = getStatusClasses(row.status)
-    return (
-      <Badge variant="outline" className={cls}>
-        {row.status}
-      </Badge>
-    )
   }
 
   // =============================================================================
@@ -529,7 +513,7 @@ export function SchedulingPage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Unified Pipelines & Jobs */}
+        {/* Pipelines, dbt models, dbt tests — split sub-tabs */}
         <TabsContent value="items" className="space-y-4">
           {/* Filters */}
           <div className="flex items-center gap-4">
@@ -542,16 +526,6 @@ export function SchedulingPage() {
                 className="pl-10"
               />
             </div>
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="pipeline">Pipelines</SelectItem>
-                <SelectItem value="dbt">dbt Jobs</SelectItem>
-              </SelectContent>
-            </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[170px]">
                 <SelectValue placeholder="Schedule" />
@@ -568,67 +542,108 @@ export function SchedulingPage() {
             </Button>
           </div>
 
-          {/* Table */}
           {isLoading ? (
             <div className="flex h-64 items-center justify-center">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
-          ) : filteredRows.length > 0 ? (
-            <Card>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Schedule</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Last Run</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredRows.map((row) => (
-                      <UnifiedRowItem
-                        key={`${row.entityType}-${row.id}`}
-                        row={row}
-                        onTrigger={(jobId) => triggerMutation.mutate(jobId)}
-                        onTogglePause={handleTogglePause}
-                        onDeleteJob={(j) => setDeleteTarget(j)}
-                        triggerPending={triggerMutation.isPending}
-                      />
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
           ) : (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <Database className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-medium mb-2">Nothing to show</h3>
-                <p className="text-muted-foreground text-center mb-4">
-                  {searchQuery
-                    ? 'No items match your search'
-                    : "You haven't created any pipelines or jobs yet"}
-                </p>
-                <div className="flex gap-2">
-                  <Button asChild>
-                    <Link to="/app/pipelines/new">
-                      <Plus className="mr-2 h-4 w-4" />
-                      New Pipeline
-                    </Link>
-                  </Button>
-                  <Button asChild variant="outline">
-                    <Link to="/app/jobs/new">
-                      <Plus className="mr-2 h-4 w-4" />
-                      New Job
-                    </Link>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+            <Tabs defaultValue="pipelines" className="space-y-4 w-full">
+              <TabsList className="grid w-full grid-cols-3 h-auto gap-1 rounded-xl border border-border/60 bg-muted/30 p-1.5">
+                <TabsTrigger
+                  value="pipelines"
+                  className="group flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all hover:bg-background/60 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  <GitBranch className="h-4 w-4" />
+                  Pipelines
+                  <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
+                    {pipelineRows.length}
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger
+                  value="dbt-models"
+                  className="group flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all hover:bg-background/60 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  <Code2 className="h-4 w-4" />
+                  dbt models
+                  <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
+                    {dbtModelRows.length}
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger
+                  value="dbt-tests"
+                  className="group flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all hover:bg-background/60 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  <Code2 className="h-4 w-4" />
+                  dbt tests
+                  <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
+                    {dbtTestRows.length}
+                  </Badge>
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="pipelines">
+                {pipelineRows.length > 0 ? (
+                  <RowsTable
+                    rows={pipelineRows}
+                    onTrigger={(jobId) => triggerMutation.mutate(jobId)}
+                    onTogglePause={handleTogglePause}
+                    onDeleteJob={(j) => setDeleteTarget(j)}
+                    triggerPending={triggerMutation.isPending}
+                  />
+                ) : (
+                  <EmptyState
+                    title="No pipelines yet"
+                    description="Create a dlt pipeline to ingest data into the lake."
+                    primary={{
+                      label: 'New Pipeline',
+                      to: '/app/pipelines/new',
+                    }}
+                  />
+                )}
+              </TabsContent>
+
+              <TabsContent value="dbt-models">
+                {dbtModelRows.length > 0 ? (
+                  <RowsTable
+                    rows={dbtModelRows}
+                    onTrigger={(jobId) => triggerMutation.mutate(jobId)}
+                    onTogglePause={handleTogglePause}
+                    onDeleteJob={(j) => setDeleteTarget(j)}
+                    triggerPending={triggerMutation.isPending}
+                  />
+                ) : (
+                  <EmptyState
+                    title="No scheduled dbt model runs"
+                    description="Schedule a dbt run job to materialize your models on a cadence."
+                    primary={{
+                      label: 'Schedule dbt run',
+                      to: '/app/jobs/new?kind=dbt_run',
+                    }}
+                  />
+                )}
+              </TabsContent>
+
+              <TabsContent value="dbt-tests">
+                {dbtTestRows.length > 0 ? (
+                  <RowsTable
+                    rows={dbtTestRows}
+                    onTrigger={(jobId) => triggerMutation.mutate(jobId)}
+                    onTogglePause={handleTogglePause}
+                    onDeleteJob={(j) => setDeleteTarget(j)}
+                    triggerPending={triggerMutation.isPending}
+                  />
+                ) : (
+                  <EmptyState
+                    title="No scheduled dbt tests"
+                    description="Schedule dbt tests to validate your models on a cadence."
+                    primary={{
+                      label: 'Schedule dbt test',
+                      to: '/app/jobs/new?kind=dbt_test',
+                    }}
+                  />
+                )}
+              </TabsContent>
+            </Tabs>
           )}
         </TabsContent>
 
@@ -641,7 +656,52 @@ export function SchedulingPage() {
         </TabsContent>
 
         <TabsContent value="schedules">
-          <ScheduleList />
+          {isLoading ? (
+            <div className="flex h-64 items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : scheduledRows.length > 0 ? (
+            <RowsTable
+              rows={scheduledRows}
+              onTrigger={(jobId) => triggerMutation.mutate(jobId)}
+              onTogglePause={handleTogglePause}
+              onDeleteJob={(j) => setDeleteTarget(j)}
+              triggerPending={triggerMutation.isPending}
+            />
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-medium mb-2">
+                  No schedules configured
+                </h3>
+                <p className="text-muted-foreground text-center mb-4">
+                  Configure a schedule on any pipeline, dbt model, or dbt test
+                  to see it here.
+                </p>
+                <div className="flex gap-2">
+                  <Button asChild variant="outline">
+                    <Link to="/app/pipelines/new">
+                      <Plus className="mr-2 h-4 w-4" />
+                      New Pipeline
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline">
+                    <Link to="/app/jobs/new?kind=dbt_run">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Schedule dbt run
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline">
+                    <Link to="/app/jobs/new?kind=dbt_test">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Schedule dbt test
+                    </Link>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="sensors">
@@ -726,10 +786,15 @@ function UnifiedRowItem({
             <GitBranch className="mr-1 h-3 w-3" />
             Pipeline
           </Badge>
+        ) : entityType === 'dbt_test' ? (
+          <Badge variant="outline" className="border-pink-400 text-pink-600">
+            <Code2 className="mr-1 h-3 w-3" />
+            dbt test
+          </Badge>
         ) : (
           <Badge variant="outline" className="border-blue-400 text-blue-600">
             <Code2 className="mr-1 h-3 w-3" />
-            dbt
+            dbt run
           </Badge>
         )}
       </TableCell>
@@ -874,6 +939,84 @@ function UnifiedRowItem({
         </div>
       </TableCell>
     </TableRow>
+  )
+}
+
+// =============================================================================
+// RowsTable — shared table wrapper used by each sub-tab
+// =============================================================================
+interface RowsTableProps {
+  rows: UnifiedRow[]
+  onTrigger: (jobId: string) => void
+  onTogglePause: (job: Job) => void
+  onDeleteJob: (job: Job) => void
+  triggerPending: boolean
+}
+
+function RowsTable({
+  rows,
+  onTrigger,
+  onTogglePause,
+  onDeleteJob,
+  triggerPending,
+}: RowsTableProps) {
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Source</TableHead>
+              <TableHead>Schedule</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Last Run</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <UnifiedRowItem
+                key={`${row.entityType}-${row.id}`}
+                row={row}
+                onTrigger={onTrigger}
+                onTogglePause={onTogglePause}
+                onDeleteJob={onDeleteJob}
+                triggerPending={triggerPending}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  )
+}
+
+// =============================================================================
+// EmptyState — shown when a sub-tab has no rows
+// =============================================================================
+interface EmptyStateProps {
+  title: string
+  description: string
+  primary: { label: string; to: string }
+}
+
+function EmptyState({ title, description, primary }: EmptyStateProps) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center justify-center py-12">
+        <Database className="h-12 w-12 text-muted-foreground mb-4" />
+        <h3 className="text-lg font-medium mb-2">{title}</h3>
+        <p className="text-muted-foreground text-center mb-4">{description}</p>
+        <Button asChild>
+          <Link to={primary.to}>
+            <Plus className="mr-2 h-4 w-4" />
+            {primary.label}
+          </Link>
+        </Button>
+      </CardContent>
+    </Card>
   )
 }
 

@@ -105,48 +105,96 @@ class ClickHouseClient:
             tenant_id: Optional tenant ID for tenant-specific config
             use_infrastructure_config: Whether to use infrastructure config service
         """
-        # Try to get config from infrastructure config service first
-        if use_infrastructure_config and not all([host, port, user]):
+        import os
+
+        # ── 1. Environment / Flask config wins over DB-seeded values ──
+        # This client speaks the native ClickHouse binary protocol, so any
+        # source-of-truth that points at the HTTP port (8123) will fail with
+        # "Unexpected EOF while reading bytes". Operators control the real
+        # values via env vars (see backend/entrypoint.sh and docker-compose);
+        # the DB infrastructure_config table is only used as a fallback.
+        env_host = os.environ.get('CLICKHOUSE_HOST')
+        env_port = os.environ.get('CLICKHOUSE_PORT') or os.environ.get('CLICKHOUSE_NATIVE_PORT')
+        env_user = os.environ.get('CLICKHOUSE_USER')
+        env_password = os.environ.get('CLICKHOUSE_PASSWORD')
+        env_database = os.environ.get('CLICKHOUSE_DATABASE')
+        env_secure_raw = os.environ.get('CLICKHOUSE_SECURE')
+
+        flask_host = flask_port = flask_user = flask_password = flask_secure = None
+        try:
+            cfg = current_app.config
+            flask_host = cfg.get('CLICKHOUSE_HOST')
+            flask_port = cfg.get('CLICKHOUSE_PORT')
+            flask_user = cfg.get('CLICKHOUSE_USER')
+            flask_password = cfg.get('CLICKHOUSE_PASSWORD')
+            flask_secure = cfg.get('CLICKHOUSE_SECURE')
+        except RuntimeError:
+            pass  # outside app context
+
+        # ── 2. DB-stored infrastructure config is a fallback ──
+        infra_settings: Dict[str, Any] = {}
+        if use_infrastructure_config:
             try:
-                from app.domains.tenants.infrastructure.config_service import InfrastructureConfigService
+                from app.domains.tenants.infrastructure.config_service import (
+                    InfrastructureConfigService,
+                )
                 config_service = InfrastructureConfigService()
-                settings = config_service.get_effective_settings('clickhouse', tenant_id)
-                
-                self.host = host or settings.get('host', 'localhost')
-                self.port = port or settings.get('port', 9000)
-                self.user = user or settings.get('user', 'default')
-                self.password = password or settings.get('password', '')
-                self.secure = secure or settings.get('secure', False)
-                self.database = database or settings.get('database', 'default')
-                self.connect_timeout = settings.get('connect_timeout', connect_timeout)
-                self.send_receive_timeout = settings.get('send_receive_timeout', send_receive_timeout)
-                
-                self._client = None
-                return
+                infra_settings = config_service.get_effective_settings(
+                    'clickhouse', tenant_id
+                ) or {}
             except Exception as e:
                 logger.debug(f"Could not load infrastructure config: {e}")
-        
-        # Fall back to Flask config, then to parameters or defaults
+
+        def _pick(*candidates, default=None):
+            for c in candidates:
+                if c is not None and c != '':
+                    return c
+            return default
+
+        self.host = _pick(host, env_host, flask_host, infra_settings.get('host'), default='localhost')
+
+        raw_port = _pick(port, env_port, flask_port, infra_settings.get('port'), default=9000)
         try:
-            config = current_app.config
-            self.host = host or config.get('CLICKHOUSE_HOST', 'localhost')
-            self.port = port or config.get('CLICKHOUSE_PORT', 9000)
-            self.user = user or config.get('CLICKHOUSE_USER', 'default')
-            self.password = password or config.get('CLICKHOUSE_PASSWORD', '')
-            self.secure = secure or config.get('CLICKHOUSE_SECURE', False)
-        except RuntimeError:
-            # Outside Flask context – read from env vars
-            import os
-            self.host = host or os.environ.get('CLICKHOUSE_HOST', 'localhost')
-            self.port = port or int(os.environ.get('CLICKHOUSE_PORT', 9000))
-            self.user = user or os.environ.get('CLICKHOUSE_USER', 'default')
-            self.password = password or os.environ.get('CLICKHOUSE_PASSWORD', '')
-            self.secure = secure
-        
-        self.database = database or 'default'
-        self.connect_timeout = connect_timeout
-        self.send_receive_timeout = send_receive_timeout
-        
+            resolved_port = int(raw_port)
+        except (TypeError, ValueError):
+            resolved_port = 9000
+        # Safety net: clickhouse_driver speaks the native binary protocol on
+        # port 9000. If config (especially the seeded DB default) accidentally
+        # points at the HTTP port 8123, transparently coerce to 9000 so the
+        # connection actually works.
+        if resolved_port == 8123:
+            logger.warning(
+                "ClickHouse port 8123 (HTTP) is not usable by clickhouse_driver "
+                "native protocol; coercing to 9000."
+            )
+            resolved_port = 9000
+        self.port = resolved_port
+
+        self.user = _pick(user, env_user, flask_user, infra_settings.get('user'), default='default')
+        self.password = _pick(
+            password, env_password, flask_password, infra_settings.get('password'), default=''
+        )
+        self.database = _pick(
+            database, env_database, infra_settings.get('database'), default='default'
+        )
+
+        if env_secure_raw is not None:
+            env_secure = env_secure_raw.lower() in ('1', 'true', 'yes')
+        else:
+            env_secure = None
+        self.secure = bool(_pick(
+            secure if secure else None,
+            env_secure,
+            flask_secure,
+            infra_settings.get('secure'),
+            default=False,
+        ))
+
+        self.connect_timeout = int(infra_settings.get('connect_timeout', connect_timeout))
+        self.send_receive_timeout = int(
+            infra_settings.get('send_receive_timeout', send_receive_timeout)
+        )
+
         self._client = None
     
     @property

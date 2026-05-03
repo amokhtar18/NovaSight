@@ -14,6 +14,16 @@ import { PasswordInput } from './PasswordInput'
 const loginSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
   password: z.string().min(1, 'Password is required'),
+  tenantSlug: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(
+      /^[a-z][a-z0-9-]{2,49}$/,
+      'Tenant slug must start with a letter and contain only lowercase letters, numbers, and hyphens',
+    )
+    .optional()
+    .or(z.literal('')),
   rememberMe: z.boolean().optional().default(false),
 })
 
@@ -40,6 +50,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
     defaultValues: {
       email: '',
       password: '',
+      tenantSlug: '',
       rememberMe: false,
     },
   })
@@ -67,7 +78,8 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
   const onSubmit = async (data: LoginFormData) => {
     setError(null)
     try {
-      await login(data.email, data.password, data.rememberMe)
+      const tenantSlug = data.tenantSlug?.trim().toLowerCase() || undefined
+      await login(data.email, data.password, data.rememberMe, tenantSlug)
       
       if (onSuccess) {
         onSuccess()
@@ -127,6 +139,27 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
         />
         {errors.password && (
           <p className="text-sm text-destructive">{errors.password.message}</p>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="tenantSlug" className="flex items-center justify-between">
+          <span>Workspace</span>
+          <span className="text-xs font-normal text-muted-foreground">Optional</span>
+        </Label>
+        <Input
+          id="tenantSlug"
+          type="text"
+          placeholder="e.g. acme"
+          autoComplete="organization"
+          disabled={isLoading}
+          {...register('tenantSlug')}
+        />
+        <p className="text-xs text-muted-foreground">
+          Required only if your email is registered in multiple workspaces.
+        </p>
+        {errors.tenantSlug && (
+          <p className="text-sm text-destructive">{errors.tenantSlug.message}</p>
         )}
       </div>
 

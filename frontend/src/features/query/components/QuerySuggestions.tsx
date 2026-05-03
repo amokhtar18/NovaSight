@@ -52,7 +52,7 @@ export function QuerySuggestions({ onSelect }: QuerySuggestionsProps) {
     queryKey: ['query-suggestions'],
     queryFn: async () => {
       try {
-        const response = await api.get<string[]>('/assistant/nl-to-sql/suggestions')
+        const response = await api.get<string[]>('/api/v1/assistant/nl-to-sql/suggestions')
         return response.data
       } catch {
         return null

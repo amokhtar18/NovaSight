@@ -9,8 +9,8 @@ services:
   # ============================================
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: backend/Dockerfile.dev
     environment:
       FLASK_ENV: development
       FLASK_DEBUG: "1"

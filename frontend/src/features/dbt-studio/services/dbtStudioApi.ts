@@ -364,6 +364,35 @@ export const dbtProjectApi = {
   },
 
   /**
+   * Update (overwrite) a file in the tenant project. Only files under the
+   * dbt user-managed directories (models, tests, snapshots, seeds, macros,
+   * analyses) with safe text extensions can be edited.
+   */
+  async saveFile(
+    path: string,
+    content: string,
+  ): Promise<{ success: boolean; path: string; size: number }> {
+    const response = await apiClient.put(
+      '/api/v1/dbt/project/file',
+      { content },
+      { params: { path } },
+    )
+    return response.data
+  },
+
+  /**
+   * Delete a file (dbt model, test, snapshot, seed, macro, or analysis)
+   * from the tenant project. For .sql models, the paired schema YAML
+   * (`_<name>.yml`) is also removed when present.
+   */
+  async deleteFile(path: string): Promise<{ success: boolean; deleted: string[] }> {
+    const response = await apiClient.delete('/api/v1/dbt/project/file', {
+      params: { path },
+    })
+    return response.data
+  },
+
+  /**
    * List project models
    */
   async listModels(): Promise<{

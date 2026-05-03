@@ -28,12 +28,12 @@ import {
   PipelinesListPage, 
   PipelineBuilderPage, 
 } from '@/pages/pipelines'
-import { SemanticModelsPage, ModelDetailPage } from '@/features/semantic'
 import { EnhancedDbtStudioPage, ModelDetailPage as DbtModelDetailPage } from '@/features/dbt-studio'
 import { DashboardsListPage, DashboardBuilderPage } from '@/features/dashboards'
 import { AIWorkbenchPage } from '@/features/query'
 import { SqlEditorPage } from '@/features/sql-editor'
 import { ChartsListPage, ChartBuilderPage, ChartViewPage } from '@/pages/charts'
+import { DatasetsListPage, DatasetDetailPage, DatasetCreatePage } from '@/features/datasets'
 import { DocumentationPage } from '@/pages/documentation'
 import { InfrastructureConfigPage, AuditLogsPage, RolesManagementPage, DbtOperationsPage, BackupManagementPage, TenantUserManagementPage } from '@/pages/admin'
 import { SettingsPage } from '@/pages/settings'
@@ -122,9 +122,9 @@ function App() {
             <Route path="pyspark" element={<Navigate to="/app/pipelines" replace />} />
             <Route path="pyspark/*" element={<Navigate to="/app/pipelines" replace />} />
             
-            {/* Semantic Layer */}
-            <Route path="semantic" element={<SemanticModelsPage />} />
-            <Route path="semantic/models/:modelId" element={<ModelDetailPage />} />
+            {/* Semantic Layer (removed; redirect retained for old links) */}
+            <Route path="semantic" element={<Navigate to="/app/datasets" replace />} />
+            <Route path="semantic/*" element={<Navigate to="/app/datasets" replace />} />
             
             {/* dbt Studio - No-code/Low-code dbt Builder */}
             <Route path="dbt-studio" element={<EnhancedDbtStudioPage />} />
@@ -139,6 +139,11 @@ function App() {
             <Route path="charts/new" element={<ChartBuilderPage />} />
             <Route path="charts/:chartId" element={<ChartViewPage />} />
             <Route path="charts/:chartId/edit" element={<ChartBuilderPage />} />
+
+            {/* Datasets — Superset-inspired reusable data sources */}
+            <Route path="datasets" element={<DatasetsListPage />} />
+            <Route path="datasets/new" element={<DatasetCreatePage />} />
+            <Route path="datasets/:id" element={<DatasetDetailPage />} />
             
             {/* AI Query Interface */}
             <Route path="query" element={<AIWorkbenchPage />} />
@@ -180,7 +185,7 @@ function App() {
           <Route path="/dags" element={<Navigate to="/app/jobs" replace />} />
           <Route path="/jobs" element={<Navigate to="/app/jobs" replace />} />
           <Route path="/pyspark" element={<Navigate to="/app/pipelines" replace />} />
-          <Route path="/semantic" element={<Navigate to="/app/semantic" replace />} />
+          <Route path="/semantic" element={<Navigate to="/app/datasets" replace />} />
           <Route path="/dashboards" element={<Navigate to="/app/dashboards" replace />} />
           <Route path="/query" element={<Navigate to="/app/query" replace />} />
           <Route path="/settings" element={<Navigate to="/app/settings" replace />} />

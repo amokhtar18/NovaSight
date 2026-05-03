@@ -161,6 +161,33 @@ export function VisualQueryBuilder({
   )
   const { data: lakeTables = [] } = useLakeTables()
 
+  // Group ClickHouse schemas by their dbt layer so the dropdown shows
+  // dedicated sections for Warehouse / Staging / Intermediate / Marts /
+  // Other. Backend tags each schema with a ``layer`` field; legacy
+  // responses without it fall back to "Other".
+  const warehouseSchemaGroups = useMemo(() => {
+    const order: Array<{
+      key: 'warehouse' | 'staging' | 'intermediate' | 'marts' | 'raw'
+      label: string
+    }> = [
+      { key: 'warehouse', label: 'Warehouse (raw)' },
+      { key: 'staging', label: 'Staging (dbt)' },
+      { key: 'intermediate', label: 'Intermediate (dbt)' },
+      { key: 'marts', label: 'Marts (dbt)' },
+      { key: 'raw', label: 'Other' },
+    ]
+    const buckets = new Map<string, typeof warehouseSchemas>()
+    for (const s of warehouseSchemas) {
+      const layer = (s as { layer?: string }).layer || 'raw'
+      const arr = buckets.get(layer) || []
+      arr.push(s)
+      buckets.set(layer, arr)
+    }
+    return order
+      .map((g) => ({ ...g, items: buckets.get(g.key) || [] }))
+      .filter((g) => g.items.length > 0)
+  }, [warehouseSchemas])
+
   // Group lake tables by namespace so they render under their namespace
   // header in the schema dropdown.
   const lakeNamespaces = useMemo(() => {
@@ -457,24 +484,37 @@ export function VisualQueryBuilder({
                     <SelectValue placeholder="Select a source…" />
                   </SelectTrigger>
                   <SelectContent>
-                    {warehouseSchemas.length > 0 && (
-                      <SelectGroup>
-                        <SelectLabel className="flex items-center gap-1.5 text-[11px]">
-                          <Database className="h-3 w-3" />
-                          ClickHouse
-                        </SelectLabel>
-                        {warehouseSchemas.map((s: { name: string }) => (
-                          <SelectItem
-                            key={`wh::${s.name}`}
-                            value={`wh::${s.name}`}
-                            className="font-mono text-xs"
-                          >
-                            {s.name}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    )}
-                    {warehouseSchemas.length > 0 && lakeNamespaces.length > 0 && (
+                    {warehouseSchemaGroups.map((group, idx) => (
+                      <div key={`wh-group-${group.key}`}>
+                        {idx > 0 && <SelectSeparator />}
+                        <SelectGroup>
+                          <SelectLabel className="flex items-center gap-1.5 text-[11px]">
+                            <Database className="h-3 w-3" />
+                            ClickHouse — {group.label}
+                          </SelectLabel>
+                          {group.items.map((s) => {
+                            const exists = (s as { exists?: boolean }).exists
+                            return (
+                              <SelectItem
+                                key={`wh::${s.name}`}
+                                value={`wh::${s.name}`}
+                                className="font-mono text-xs"
+                              >
+                                <div className="flex flex-col">
+                                  <span>{s.name}</span>
+                                  {exists === false && (
+                                    <span className="text-[10px] text-muted-foreground">
+                                      not materialized yet — run dbt first
+                                    </span>
+                                  )}
+                                </div>
+                              </SelectItem>
+                            )
+                          })}
+                        </SelectGroup>
+                      </div>
+                    ))}
+                    {warehouseSchemaGroups.length > 0 && lakeNamespaces.length > 0 && (
                       <SelectSeparator />
                     )}
                     {lakeNamespaces.length > 0 && (
@@ -497,7 +537,7 @@ export function VisualQueryBuilder({
                         ))}
                       </SelectGroup>
                     )}
-                    {warehouseSchemas.length === 0 && lakeNamespaces.length === 0 && (
+                    {warehouseSchemaGroups.length === 0 && lakeNamespaces.length === 0 && (
                       <div className="px-2 py-1.5 text-xs text-muted-foreground">
                         No sources available
                       </div>

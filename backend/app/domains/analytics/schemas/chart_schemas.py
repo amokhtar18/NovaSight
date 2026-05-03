@@ -34,8 +34,8 @@ class ChartTypeEnum(str, Enum):
 
 class ChartSourceTypeEnum(str, Enum):
     """Data source type for charts."""
-    SEMANTIC_MODEL = "semantic_model"
     SQL_QUERY = "sql_query"
+    DATASET = "dataset"
 
 
 class FilterOperatorEnum(str, Enum):
@@ -153,7 +153,7 @@ class ChartCreateSchema(BaseModel):
     description: Optional[str] = Field(None, max_length=500)
     chart_type: ChartTypeEnum
     source_type: ChartSourceTypeEnum
-    semantic_model_id: Optional[UUID] = None
+    dataset_id: Optional[UUID] = None
     sql_query: Optional[str] = None
     query_config: ChartQueryConfigSchema = Field(default_factory=ChartQueryConfigSchema)
     viz_config: ChartVizConfigSchema = Field(default_factory=ChartVizConfigSchema)
@@ -169,12 +169,12 @@ class ChartCreateSchema(BaseModel):
             raise ValueError("SQL query is required for SQL source type")
         return v
     
-    @validator('semantic_model_id')
-    def validate_semantic_model(cls, v, values):
-        """Validate semantic model is provided for semantic source type."""
+    @validator('dataset_id')
+    def validate_dataset(cls, v, values):
+        """Validate dataset is provided for dataset source type."""
         source_type = values.get('source_type')
-        if source_type == ChartSourceTypeEnum.SEMANTIC_MODEL and not v:
-            raise ValueError("Semantic model ID is required for semantic model source type")
+        if source_type == ChartSourceTypeEnum.DATASET and not v:
+            raise ValueError("Dataset ID is required for dataset source type")
         return v
 
 
@@ -184,7 +184,7 @@ class ChartUpdateSchema(BaseModel):
     description: Optional[str] = Field(None, max_length=500)
     chart_type: Optional[ChartTypeEnum] = None
     source_type: Optional[ChartSourceTypeEnum] = None
-    semantic_model_id: Optional[UUID] = None
+    dataset_id: Optional[UUID] = None
     sql_query: Optional[str] = None
     query_config: Optional[ChartQueryConfigSchema] = None
     viz_config: Optional[ChartVizConfigSchema] = None
@@ -200,7 +200,7 @@ class ChartResponseSchema(BaseModel):
     description: Optional[str]
     chart_type: ChartTypeEnum
     source_type: ChartSourceTypeEnum
-    semantic_model_id: Optional[UUID]
+    dataset_id: Optional[UUID] = None
     query_config: Dict[str, Any]
     viz_config: Dict[str, Any]
     folder_id: Optional[UUID]
@@ -242,7 +242,7 @@ class ChartDataResponseSchema(BaseModel):
 class ChartPreviewSchema(BaseModel):
     """Schema for previewing chart data without saving."""
     source_type: ChartSourceTypeEnum
-    semantic_model_id: Optional[UUID] = None
+    dataset_id: Optional[UUID] = None
     sql_query: Optional[str] = None
     query_config: ChartQueryConfigSchema = Field(default_factory=ChartQueryConfigSchema)
     limit: int = Field(default=100, ge=1, le=1000)

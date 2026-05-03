@@ -45,7 +45,33 @@ class OllamaModelPullRequest(BaseModel):
     model: str = Field(..., min_length=1, max_length=255)
 
 
-def _ollama_base_url() -> str:
+def _ollama_base_url(tenant_id: str | None = None) -> str:
+    """
+    Resolve the active Ollama base URL.
+
+    Precedence: active ``InfrastructureConfig`` row (DB) overrides the
+    ``OLLAMA_BASE_URL`` env var. Falls back to the docker-compose default.
+    """
+    try:
+        from app.domains.tenants.infrastructure.config_service import (
+            InfrastructureConfigService,
+        )
+
+        cfg = InfrastructureConfigService().get_active_config(
+            "ollama", tenant_id
+        )
+        if cfg is not None:
+            settings = dict(cfg.settings or {})
+            url = settings.get("base_url")
+            if not url and cfg.host and cfg.port:
+                url = f"http://{cfg.host}:{cfg.port}"
+            if url:
+                return url
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug(
+            "Falling back to env-based Ollama base URL (%s)", exc
+        )
+
     return os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
 
 
@@ -59,7 +85,7 @@ def get_ollama_config():
     return (
         jsonify(
             {
-                "base_url": _ollama_base_url(),
+                "base_url": _ollama_base_url(identity.tenant_id),
                 "default_model": config.default_model,
                 "embedding_model": config.embedding_model,
             }
@@ -88,7 +114,7 @@ def update_ollama_config():
     return (
         jsonify(
             {
-                "base_url": _ollama_base_url(),
+                "base_url": _ollama_base_url(identity.tenant_id),
                 "default_model": config.default_model,
                 "embedding_model": config.embedding_model,
             }
@@ -113,7 +139,10 @@ async def pull_ollama_model():
             400,
         )
 
-    client = httpx.AsyncClient(base_url=_ollama_base_url(), timeout=600.0)
+    client = httpx.AsyncClient(
+        base_url=_ollama_base_url(get_current_identity().tenant_id),
+        timeout=600.0,
+    )
     try:
         # Ollama's pull endpoint streams progress events. We swallow the
         # body and return once the connection completes.
