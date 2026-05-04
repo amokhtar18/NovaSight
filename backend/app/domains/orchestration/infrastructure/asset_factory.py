@@ -14,6 +14,7 @@ Canonical location: ``app.domains.orchestration.infrastructure.asset_factory``
 from pathlib import Path
 from typing import Callable, Dict, List
 import logging
+import re
 
 from dagster import (
     asset,
@@ -71,10 +72,11 @@ class AssetFactory:
         }
 
         assets: List[AssetsDefinition] = []
+        local_task_ids = {task.task_id for task in (dag_config.tasks or [])}
         # Group name must satisfy Dagster's regex ^[A-Za-z0-9_]+$, so we
         # use the already-sanitized ``full_dag_id`` instead of mixing in
         # the tenant UUID directly (which contains hyphens).
-        group_name = f"tenant_{dag_config.full_dag_id}"
+        group_name = f"tenant_{self._resolve_full_dag_id(dag_config)}"
 
         for task in dag_config.tasks:
             task_type_key = (
@@ -97,7 +99,7 @@ class AssetFactory:
                 logger.warning("No builder registered for task type: %s", task_type_key)
                 continue
 
-            asset_def = builder(task, dag_config, group_name)
+            asset_def = builder(task, dag_config, group_name, local_task_ids)
             if asset_def:
                 assets.append(asset_def)
 
@@ -107,9 +109,80 @@ class AssetFactory:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _get_asset_deps(self, task) -> List[AssetKey]:
-        """Convert task dependencies to AssetKeys."""
-        return [AssetKey(dep) for dep in (task.depends_on or [])]
+    @staticmethod
+    def _sanitize_fragment(value: str) -> str:
+        """Sanitize a name fragment so it can be used in an AssetKey path."""
+        return re.sub(r"[^A-Za-z0-9_]", "_", (value or "")).strip("_")
+
+    def _resolve_full_dag_id(self, dag_config, dag_id: str = None) -> str:
+        """Resolve a sanitized full_dag_id for current tenant + dag_id."""
+        if dag_id is None:
+            full_dag_id = getattr(dag_config, "full_dag_id", None)
+            if isinstance(full_dag_id, str) and full_dag_id.strip():
+                return re.sub(r"[^A-Za-z0-9_]", "_", full_dag_id.strip())
+            dag_id = getattr(dag_config, "dag_id", "dag")
+
+        if not isinstance(dag_id, str):
+            dag_id = str(dag_id or "dag")
+
+        tenant_slug = ""
+        try:
+            tenant_slug = getattr(dag_config.tenant, "slug", "")
+        except Exception:
+            tenant_slug = ""
+
+        if not tenant_slug:
+            tenant_slug = str(self.tenant_id)
+
+        raw = f"{tenant_slug}_{dag_id}"
+        return re.sub(r"[^A-Za-z0-9_]", "_", raw)
+
+    def _asset_key_for_task(self, dag_config, task_id: str, dag_id: str = None) -> AssetKey:
+        """Build a globally unique AssetKey for a task in a DAG."""
+        return AssetKey([self._resolve_full_dag_id(dag_config, dag_id), task_id])
+
+    def _asset_key_prefix(self, dag_config) -> List[str]:
+        """Return the key prefix used by @asset declarations in this DAG."""
+        return [self._resolve_full_dag_id(dag_config)]
+
+    def _dependency_to_asset_key(self, dep: str, dag_config, local_task_ids) -> AssetKey:
+        """Parse local or external dependency strings into Dagster AssetKeys."""
+        dependency = (dep or "").strip()
+        if not dependency:
+            return None
+
+        if dependency.startswith("job:"):
+            # Encoded cross-job dependency: job:<dag_id>:<task_id>
+            parts = dependency.split(":", 2)
+            if len(parts) == 3 and parts[1] and parts[2]:
+                return self._asset_key_for_task(
+                    dag_config,
+                    task_id=parts[2],
+                    dag_id=parts[1],
+                )
+
+        if dependency.startswith("asset:"):
+            # Direct asset path override. Supports both '/' and '.' separators.
+            raw_path = dependency[len("asset:"):].strip()
+            if raw_path:
+                path = [p for p in re.split(r"[/.]", raw_path) if p]
+                if path:
+                    return AssetKey(path)
+
+        if dependency in local_task_ids:
+            return self._asset_key_for_task(dag_config, task_id=dependency)
+
+        # Backward-compatible fallback: treat unknown plain refs as local task ids.
+        return self._asset_key_for_task(dag_config, task_id=dependency)
+
+    def _get_asset_deps(self, task, dag_config, local_task_ids) -> List[AssetKey]:
+        """Convert task dependencies to local or cross-job AssetKeys."""
+        deps: List[AssetKey] = []
+        for dep in (task.depends_on or []):
+            dep_key = self._dependency_to_asset_key(dep, dag_config, local_task_ids)
+            if dep_key:
+                deps.append(dep_key)
+        return deps
 
     @staticmethod
     def _read_dbt_log_tail(invocation, max_chars: int = 2000) -> str:
@@ -135,17 +208,19 @@ class AssetFactory:
     # dlt
     # ------------------------------------------------------------------
 
-    def _build_dlt_asset(self, task, dag_config, group_name: str) -> AssetsDefinition:
+    def _build_dlt_asset(self, task, dag_config, group_name: str, local_task_ids) -> AssetsDefinition:
         """Build a dlt pipeline run asset."""
         config = task.config or {}
         pipeline_id = config.get("pipeline_id")
         task_id = task.task_id
         tenant_id = self.tenant_id
         dag_id = dag_config.dag_id
-        deps = self._get_asset_deps(task)
+        deps = self._get_asset_deps(task, dag_config, local_task_ids)
+        key_prefix = self._asset_key_prefix(dag_config)
 
         @asset(
             name=task_id,
+            key_prefix=key_prefix,
             group_name=group_name,
             compute_kind="dlt",
             deps=deps,
@@ -249,19 +324,37 @@ class AssetFactory:
     # dbt
     # ------------------------------------------------------------------
 
-    def _build_dbt_asset(self, task, dag_config, group_name: str) -> AssetsDefinition:
+    def _build_dbt_asset(self, task, dag_config, group_name: str, local_task_ids) -> AssetsDefinition:
         """Build a dbt run asset (default profile)."""
-        return self._build_dbt_run(task, dag_config, group_name, profile=None)
+        return self._build_dbt_run(
+            task,
+            dag_config,
+            group_name,
+            profile=None,
+            local_task_ids=local_task_ids,
+        )
 
-    def _build_dbt_lake_asset(self, task, dag_config, group_name: str) -> AssetsDefinition:
+    def _build_dbt_lake_asset(self, task, dag_config, group_name: str, local_task_ids) -> AssetsDefinition:
         """Build a dbt run asset against the DuckDB / lake profile."""
-        return self._build_dbt_run(task, dag_config, group_name, profile="lake")
+        return self._build_dbt_run(
+            task,
+            dag_config,
+            group_name,
+            profile="lake",
+            local_task_ids=local_task_ids,
+        )
 
-    def _build_dbt_warehouse_asset(self, task, dag_config, group_name: str) -> AssetsDefinition:
+    def _build_dbt_warehouse_asset(self, task, dag_config, group_name: str, local_task_ids) -> AssetsDefinition:
         """Build a dbt run asset against the ClickHouse / warehouse profile."""
-        return self._build_dbt_run(task, dag_config, group_name, profile="warehouse")
+        return self._build_dbt_run(
+            task,
+            dag_config,
+            group_name,
+            profile="warehouse",
+            local_task_ids=local_task_ids,
+        )
 
-    def _build_dbt_run(self, task, dag_config, group_name: str, profile):
+    def _build_dbt_run(self, task, dag_config, group_name: str, profile, local_task_ids):
         config = task.config or {}
         models = config.get("models", [])
         tags = config.get("tags", [])
@@ -269,7 +362,8 @@ class AssetFactory:
         task_id = task.task_id
         tenant_id = self.tenant_id
         dag_id = dag_config.dag_id
-        deps = self._get_asset_deps(task)
+        deps = self._get_asset_deps(task, dag_config, local_task_ids)
+        key_prefix = self._asset_key_prefix(dag_config)
 
         # Capture tenant slug at build time so the dbt CLI invocation can
         # populate the project-level ``tenant_id`` var. The shared
@@ -293,6 +387,7 @@ class AssetFactory:
 
         @asset(
             name=task_id,
+            key_prefix=key_prefix,
             group_name=group_name,
             compute_kind="dbt",
             deps=deps,
@@ -349,17 +444,19 @@ class AssetFactory:
 
         return _dbt_asset
 
-    def _build_dbt_test_asset(self, task, dag_config, group_name: str) -> AssetsDefinition:
+    def _build_dbt_test_asset(self, task, dag_config, group_name: str, local_task_ids) -> AssetsDefinition:
         """Build a dbt test asset."""
         config = task.config or {}
         select_arg = config.get("select", "*")
         task_id = task.task_id
         tenant_id = self.tenant_id
         dag_id = dag_config.dag_id
-        deps = self._get_asset_deps(task)
+        deps = self._get_asset_deps(task, dag_config, local_task_ids)
+        key_prefix = self._asset_key_prefix(dag_config)
 
         @asset(
             name=task_id,
+            key_prefix=key_prefix,
             group_name=group_name,
             compute_kind="dbt",
             deps=deps,

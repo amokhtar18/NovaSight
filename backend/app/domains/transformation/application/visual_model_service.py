@@ -91,6 +91,21 @@ class VisualModelService:
         4. Write files to tenant's dbt project directory
         5. Store canvas state in PostgreSQL
         """
+        from sqlalchemy.exc import IntegrityError
+        from app.errors import ConflictError
+
+        # Pre-check: surface a clean 409 instead of leaving orphan files on
+        # disk if a model with the same (tenant_id, model_name) already exists.
+        existing = (
+            VisualModel.for_tenant(tenant_id)
+            .filter(VisualModel.model_name == req.model_name)
+            .first()
+        )
+        if existing is not None:
+            raise ConflictError(
+                f"A visual model named '{req.model_name}' already exists for this tenant."
+            )
+
         manager = self._get_manager()
 
         # Generate SQL from visual config using approved template
@@ -130,7 +145,26 @@ class VisualModelService:
             description=req.description,
         )
         db.session.add(visual_model)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError as exc:
+            db.session.rollback()
+            # Race condition: another request inserted the same name between
+            # the pre-check above and our commit. Roll back generated files so
+            # we don't leak orphaned dbt artifacts on disk.
+            for p in (sql_path, yaml_path):
+                try:
+                    if p.exists():
+                        p.unlink()
+                except OSError:
+                    logger.warning("Failed to clean up %s after IntegrityError", p)
+            constraint = getattr(getattr(exc, "orig", None), "diag", None)
+            constraint_name = getattr(constraint, "constraint_name", "") or ""
+            if "uq_visual_model_tenant_name" in constraint_name or "uq_visual_model_tenant_name" in str(exc):
+                raise ConflictError(
+                    f"A visual model named '{req.model_name}' already exists for this tenant."
+                ) from exc
+            raise
 
         logger.info(
             "Created visual model %s for tenant %s at %s",
@@ -352,14 +386,9 @@ class VisualModelService:
             logger.warning("SHOW DATABASES failed for tenant %s: %s", tenant_id, exc)
             existing = []
 
-        # Filter out CH internals.
-        visible = [
-            name for name in existing
-            if name not in self._CLICKHOUSE_SYSTEM_DATABASES
-        ]
-
         # Resolve the tenant's base DB so we can synthesize the canonical
-        # dbt layer schemas if they don't physically exist yet.
+        # dbt layer schemas if they don't physically exist yet, *and* so
+        # we can restrict the visible set to schemas this tenant owns.
         tenant = Tenant.query.get(tenant_id)
         base = None
         if tenant and tenant.slug:
@@ -367,6 +396,25 @@ class VisualModelService:
             base = f"tenant_{safe_slug}"
         elif tenant_id:
             base = f"tenant_{str(tenant_id).replace('-', '_')}"
+
+        # Tenant isolation: only surface databases that belong to *this*
+        # tenant. ClickHouse is multi-tenant at the database level
+        # (``tenant_<slug>`` + ``tenant_<slug>_<layer>``) and the dbt
+        # Studio source dropdown must not leak other tenants' schemas
+        # even when the underlying CH user has broader visibility.
+        # We also drop ClickHouse internals as a defence in depth.
+        def _belongs_to_tenant(name: str) -> bool:
+            if not base:
+                return False
+            if name == base:
+                return True
+            return name.startswith(f"{base}_")
+
+        visible = [
+            name for name in existing
+            if name not in self._CLICKHOUSE_SYSTEM_DATABASES
+            and _belongs_to_tenant(name)
+        ]
 
         # Always include the canonical dbt-generated schemas so they show
         # up in the dropdown even before the first dbt run materializes
@@ -401,10 +449,42 @@ class VisualModelService:
 
         return [_classify(n) for n in ordered]
 
+    def _resolve_tenant_base(self, tenant_id: str) -> Optional[str]:
+        """Return the tenant's base ClickHouse database name (``tenant_<slug>``).
+
+        Used to gate every warehouse introspection call so a tenant can
+        never query another tenant's databases through the dbt Studio
+        introspection endpoints.
+        """
+        from app.domains.tenants.domain.models import Tenant
+
+        tenant = Tenant.query.get(tenant_id)
+        if tenant and tenant.slug:
+            safe_slug = tenant.slug.replace("-", "_").replace(".", "_").lower()
+            return f"tenant_{safe_slug}"
+        if tenant_id:
+            return f"tenant_{str(tenant_id).replace('-', '_')}"
+        return None
+
+    def _assert_schema_belongs_to_tenant(
+        self, tenant_id: str, schema: str
+    ) -> None:
+        """Raise if ``schema`` is not one of the tenant's owned databases."""
+        from app.errors import AuthorizationError
+
+        base = self._resolve_tenant_base(tenant_id)
+        if not base:
+            raise AuthorizationError("Tenant context required")
+        if schema != base and not schema.startswith(f"{base}_"):
+            raise AuthorizationError(
+                f"Schema '{schema}' is not accessible to this tenant."
+            )
+
     def list_warehouse_tables(
         self, tenant_id: str, schema: str
     ) -> List[Dict]:
         """Query ClickHouse for tables in a schema/database."""
+        self._assert_schema_belongs_to_tenant(tenant_id, schema)
         client = self._get_clickhouse_client(tenant_id)
         result = client.execute(
             "SELECT name, engine FROM system.tables WHERE database = %(db)s",
@@ -416,6 +496,7 @@ class VisualModelService:
         self, tenant_id: str, schema: str, table: str
     ) -> List[Dict]:
         """Query ClickHouse for columns in a table."""
+        self._assert_schema_belongs_to_tenant(tenant_id, schema)
         client = self._get_clickhouse_client(tenant_id)
         result = client.execute(
             "SELECT name, type, comment FROM system.columns "
@@ -426,6 +507,85 @@ class VisualModelService:
             {"name": row[0], "type": row[1], "comment": row[2]}
             for row in result.rows
         ]
+
+    def list_model_columns(
+        self, tenant_id: str, model_name: str
+    ) -> List[Dict]:
+        """Resolve columns for a saved visual model by name.
+
+        Used by the SQL Builder when a user references an upstream model
+        via ``ref()`` and needs to see what columns are available for
+        SELECT / WHERE / GROUP BY / JOIN keys.
+
+        Resolution order:
+            1. ``visual_config.columns`` on the saved VisualModel — the
+               authoritative list of output columns the model will emit.
+            2. Fallback: ClickHouse ``system.columns`` for any of the
+               tenant's dbt-managed databases (``tenant_<slug>``,
+               ``tenant_<slug>_staging``, ``tenant_<slug>_intermediate``,
+               ``tenant_<slug>_marts``) — covers models created outside
+               the visual builder, or pre-existing materialized models.
+
+        Returns ``[]`` if the model is unknown to both sources.
+        """
+        # 1) Try the saved visual config first
+        visual_model = (
+            VisualModel.for_tenant(tenant_id)
+            .filter(VisualModel.model_name == model_name)
+            .first()
+        )
+        if visual_model and visual_model.visual_config:
+            cfg_cols = visual_model.visual_config.get("columns") or []
+            if cfg_cols:
+                resolved: List[Dict] = []
+                for col in cfg_cols:
+                    if not isinstance(col, dict):
+                        continue
+                    name = (
+                        col.get("alias")
+                        or col.get("name")
+                        or col.get("source_column")
+                    )
+                    if not name:
+                        continue
+                    resolved.append({
+                        "name": name,
+                        "type": col.get("data_type") or col.get("cast") or "String",
+                        "comment": col.get("description") or "",
+                    })
+                if resolved:
+                    return resolved
+
+        # 2) Fallback to ClickHouse system.columns across tenant layers
+        from app.domains.tenants.domain.models import Tenant
+        tenant = Tenant.query.get(tenant_id)
+        if not tenant or not tenant.slug:
+            return []
+        safe_slug = tenant.slug.replace("-", "_").replace(".", "_").lower()
+        candidate_dbs = [
+            f"tenant_{safe_slug}",
+            f"tenant_{safe_slug}_staging",
+            f"tenant_{safe_slug}_intermediate",
+            f"tenant_{safe_slug}_marts",
+        ]
+
+        client = self._get_clickhouse_client(tenant_id)
+        try:
+            result = client.execute(
+                "SELECT name, type, comment FROM system.columns "
+                "WHERE database IN %(dbs)s AND table = %(tbl)s",
+                {"dbs": tuple(candidate_dbs), "tbl": model_name},
+            )
+            return [
+                {"name": row[0], "type": row[1], "comment": row[2]}
+                for row in result.rows
+            ]
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning(
+                "Could not resolve columns for model %s (tenant=%s): %s",
+                model_name, tenant_id, exc,
+            )
+            return []
 
     # ── Iceberg Lake Introspection ───────────────────────────
 

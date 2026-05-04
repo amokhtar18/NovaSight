@@ -60,7 +60,7 @@ SELECT
     {{ col.expression }} AS {{ col.name }}{% if not loop.last %},{% endif %}
 
 {% else %}
-    {{ col.source_alias | default(primary_alias) }}.{{ col.source_column | default(col.name) }}{% if col.alias is defined and col.alias != col.name %} AS {{ col.alias }}{% endif %}{% if not loop.last %},{% endif %}
+    {{ col.source_alias | default(primary_alias) }}.{{ col.source_column | default(col.name) }}{% if col.alias and col.alias != col.name %} AS {{ col.alias }}{% endif %}{% if not loop.last %},{% endif %}
 
 {% endif %}
 {% endfor %}

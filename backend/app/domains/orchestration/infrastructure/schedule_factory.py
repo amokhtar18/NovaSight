@@ -14,6 +14,7 @@ from dagster import (
     define_asset_job,
     AssetSelection,
 )
+import re
 import logging
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,16 @@ class ScheduleFactory:
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
 
+    def _resolve_full_dag_id(self, dag_config) -> str:
+        """Resolve/sanitize full DAG id for Dagster-safe names."""
+        full_dag_id = getattr(dag_config, "full_dag_id", None)
+        if isinstance(full_dag_id, str) and full_dag_id.strip():
+            raw = full_dag_id.strip()
+        else:
+            dag_id = getattr(dag_config, "dag_id", "dag")
+            raw = f"{self.tenant_id}_{dag_id}"
+        return re.sub(r"[^A-Za-z0-9_]", "_", str(raw))
+
     def build_schedule_from_dag_config(
         self,
         dag_config,
@@ -65,12 +76,14 @@ class ScheduleFactory:
             return None
         
         # Create job for this pipeline's assets
-        group_name = f"tenant_{dag_config.full_dag_id}"
-        job_name = f"{dag_config.full_dag_id}_job"
+        safe_full_dag_id = self._resolve_full_dag_id(dag_config)
+        group_name = f"tenant_{safe_full_dag_id}"
+        job_name = f"{safe_full_dag_id}_job"
+        selection = AssetSelection.groups(group_name).upstream()
         
         job = define_asset_job(
             name=job_name,
-            selection=AssetSelection.groups(group_name),
+            selection=selection,
             description=dag_config.description or f"Job for {dag_config.dag_id}",
             tags={
                 "tenant_id": self.tenant_id,
@@ -87,7 +100,7 @@ class ScheduleFactory:
             initial_status = DefaultScheduleStatus.RUNNING
         
         schedule_def = ScheduleDefinition(
-            name=f"{dag_config.full_dag_id}_schedule",
+            name=f"{safe_full_dag_id}_schedule",
             cron_schedule=cron_schedule,
             job=job,
             default_status=initial_status,
@@ -116,11 +129,13 @@ class ScheduleFactory:
 
     def build_job_from_dag_config(self, dag_config):
         """Build a job definition for manual triggering."""
-        group_name = f"tenant_{dag_config.full_dag_id}"
+        safe_full_dag_id = self._resolve_full_dag_id(dag_config)
+        group_name = f"tenant_{safe_full_dag_id}"
+        selection = AssetSelection.groups(group_name).upstream()
         
         return define_asset_job(
-            name=f"{dag_config.full_dag_id}_job",
-            selection=AssetSelection.groups(group_name),
+            name=f"{safe_full_dag_id}_job",
+            selection=selection,
             description=dag_config.description or f"Job for {dag_config.dag_id}",
             tags={
                 "tenant_id": self.tenant_id,

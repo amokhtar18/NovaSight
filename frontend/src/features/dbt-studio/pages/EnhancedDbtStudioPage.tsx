@@ -49,7 +49,7 @@ import { palette } from '@/lib/colors'
 // New visual builder imports
 import { VisualQueryBuilder } from '../components/sql-builder'
 import { TestConfigForm, FreshnessConfig, TestResultsTable } from '../components/test-builder'
-import { CodePreview, SchemaExplorer } from '../components/shared'
+import { CodePreview } from '../components/shared'
 import {
   useVisualModels,
   useCreateVisualModel,
@@ -232,8 +232,8 @@ export function EnhancedDbtStudioPage() {
   const handleTableSelect = useCallback((schema: string, table: string) => {
     setSelectedSchema(schema)
     setSelectedTable(table)
-    toast({ title: `Selected ${schema}.${table}`, description: 'Loading columns…' })
-  }, [toast])
+  }, [])
+  void handleTableSelect
 
   // Stats
   const stats = [
@@ -455,36 +455,28 @@ export function EnhancedDbtStudioPage() {
 
         {/* ── Model Builder (SQL Builder) ──────────────────────────── */}
         <TabsContent value="builder" className="space-y-4">
-          <div className="grid grid-cols-[1fr_360px] gap-4">
-            <div className="space-y-4">
-              <VisualQueryBuilder
-                key={builderResetKey}
-                availableColumns={availableColumns}
-                availableModels={
-                  (visualModels || []).map((m: any) => m.model_name)
-                }
-                selectedSourceSchema={selectedSchema}
-                selectedSourceTable={selectedTable}
-                onSchemaChange={setSelectedSchema}
-                onTableChange={setSelectedTable}
-                onSave={handleVisualSave}
-                onPreview={handleVisualPreview}
-                isSaving={createVisualModel.isPending}
+          <div className="space-y-4">
+            <VisualQueryBuilder
+              key={builderResetKey}
+              availableColumns={availableColumns}
+              availableModels={
+                (visualModels || []).map((m: any) => m.model_name)
+              }
+              selectedSourceSchema={selectedSchema}
+              selectedSourceTable={selectedTable}
+              onSchemaChange={setSelectedSchema}
+              onTableChange={setSelectedTable}
+              onSave={handleVisualSave}
+              onPreview={handleVisualPreview}
+              isSaving={createVisualModel.isPending}
+            />
+            {codePreview.data && (
+              <CodePreview
+                sql={codePreview.data.sql}
+                yaml={codePreview.data.yaml}
+                title="Generated dbt Code"
               />
-              {codePreview.data && (
-                <CodePreview
-                  sql={codePreview.data.sql}
-                  yaml={codePreview.data.yaml}
-                  title="Generated dbt Code"
-                />
-              )}
-            </div>
-            <div>
-              <SchemaExplorer
-                onTableSelect={handleTableSelect}
-                maxHeight="700px"
-              />
-            </div>
+            )}
           </div>
         </TabsContent>
 

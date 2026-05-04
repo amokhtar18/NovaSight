@@ -22,7 +22,10 @@ from orchestration.resources.database_resource import DatabaseResource
 from orchestration.assets.dlt_builder import load_all_dlt_assets
 from orchestration.schedules.dlt_schedules import load_all_dlt_schedules
 # dbt schedules
-from orchestration.schedules.dbt_schedules import load_all_dbt_schedules
+from orchestration.schedules.dbt_schedules import (
+    load_all_dbt_schedules,
+    load_all_dbt_model_schedules,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +190,11 @@ logger.info(f"Loaded {len(dlt_schedules)} dlt pipeline schedules")
 dbt_schedules = load_all_dbt_schedules()
 all_schedules.extend(dbt_schedules)
 logger.info(f"Loaded {len(dbt_schedules)} dbt transformation schedules")
+
+# Load per-model dbt schedules (run/test/build per individual model)
+dbt_model_schedules = load_all_dbt_model_schedules()
+all_schedules.extend(dbt_model_schedules)
+logger.info(f"Loaded {len(dbt_model_schedules)} per-model dbt schedules")
 
 # Register launchable jobs for MANUAL-scheduled DAGs (so the backend can
 # trigger them via Dagster's LaunchRun mutation). DAGs with CRON/PRESET

@@ -177,11 +177,16 @@ echo [INFO] Waiting for databases to be healthy...
 timeout /t 10 /nobreak >nul
 
 if "%NO_AIRFLOW%"=="false" (
-    echo [INFO] Starting Airflow 3.x services...
-    %COMPOSE_CMD% up -d airflow-postgres airflow-init
-    timeout /t 15 /nobreak >nul
-    echo [INFO] Starting Airflow API Server, DAG Processor, Scheduler, and Triggerer...
-    %COMPOSE_CMD% up -d airflow-api-server airflow-dag-processor airflow-scheduler airflow-triggerer
+    %COMPOSE_CMD% config --services | findstr /i /x "airflow-postgres" >nul
+    if errorlevel 1 (
+        echo [INFO] Airflow services not defined in compose config. Skipping Airflow startup.
+    ) else (
+        echo [INFO] Starting Airflow 3.x services...
+        %COMPOSE_CMD% up -d airflow-postgres airflow-init
+        timeout /t 15 /nobreak >nul
+        echo [INFO] Starting Airflow API Server, DAG Processor, Scheduler, and Triggerer...
+        %COMPOSE_CMD% up -d airflow-api-server airflow-dag-processor airflow-scheduler airflow-triggerer
+    )
 ) else (
     echo [INFO] Skipping Airflow (--no-airflow flag set)
 )
@@ -195,10 +200,9 @@ echo [INFO] Starting application services (with integrated Dagster)...
 %COMPOSE_CMD% up -d backend frontend %BUILD_FLAG%
 
 if "%MONITORING%"=="true" (
-    echo [INFO] Starting monitoring stack (Prometheus, Grafana, Loki)...
-    %COMPOSE_CMD% -f docker-compose.yml -f docker-compose.logging.yml up -d prometheus grafana loki promtail 2>nul || (
-        echo [WARN] Monitoring services not found in compose files. Skipping...
-    )
+    echo [INFO] Starting monitoring stack ^(Prometheus, Grafana, Loki^)...
+    %COMPOSE_CMD% -f docker-compose.yml -f docker-compose.logging.yml up -d prometheus grafana loki promtail 2>nul
+    if errorlevel 1 echo [WARN] Monitoring services not found in compose files. Skipping...
 )
 
 echo.
@@ -209,7 +213,7 @@ echo   Frontend:     http://localhost:5173
 echo   Backend API:  http://localhost:5000
 echo   API Docs:     http://localhost:5000/api/v1/docs
 echo   Dagster UI:   http://localhost:3000
-echo   Airflow UI:   http://localhost:8080 (airflow/airflow)
+echo   Airflow UI:   http://localhost:8080 ^(airflow/airflow^)
 echo   ClickHouse:   http://localhost:8123
 echo   Ollama:       http://localhost:11434
 echo.

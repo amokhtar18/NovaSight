@@ -34,6 +34,7 @@ import {
   useWarehouseSchemas,
   useWarehouseTables,
   useLakeTables,
+  useColumnsForModels,
 } from '../../hooks/useWarehouseSchema'
 import type {
   VisualModelCreatePayload,
@@ -221,11 +222,26 @@ export function VisualQueryBuilder({
   }, [sourceKind, sourceName, warehouseTables, lakeTables])
 
   // Columns available to the SELECT/WHERE/GROUP BY builders.
-  // For Iceberg sources the Lake API returns columns inline on the table
-  // descriptor, so we map them to the WarehouseColumn shape here. For
-  // ClickHouse sources we fall back to the parent-supplied list (which is
-  // populated via ``useWarehouseColumns``).
+  // Resolution depends on the source mode:
+  //   * ``table`` + ``warehouse`` → parent-supplied list (from useWarehouseColumns)
+  //   * ``table`` + ``lake``      → columns inline on the lake table descriptor
+  //   * ``ref``                   → flattened columns from every ref()'d model,
+  //                                 plus any columns referenced by the JOIN tabs
+  //                                 (so users can join against a dim from marts).
+  // The JoinBuilder also needs to resolve right-side columns per join, so we
+  // collect every model name in play (refs + joins) and resolve them in parallel.
+  const refModels = useMemo(() => {
+    const set = new Set<string>(refs.filter(Boolean))
+    joins.forEach((j) => j.source_model && set.add(j.source_model))
+    return Array.from(set)
+  }, [refs, joins])
+  const { columns: refColumns, byModel: columnsByModel } =
+    useColumnsForModels(refModels)
+
   const effectiveAvailableColumns = useMemo<WarehouseColumn[]>(() => {
+    if (sourceMode === 'ref') {
+      return refColumns
+    }
     if (sourceKind === 'lake' && sourceName && sourceTable) {
       const t = lakeTables.find(
         (x) =>
@@ -241,11 +257,37 @@ export function VisualQueryBuilder({
       return []
     }
     return availableColumns
-  }, [sourceKind, sourceName, sourceTable, lakeTables, availableColumns])
+  }, [sourceMode, sourceKind, sourceName, sourceTable, lakeTables, availableColumns, refColumns])
 
-  // Encoded values for the schema dropdown: ``wh::<schema>`` or ``lake::<ns>``
-  const schemaSelectValue =
-    sourceName ? `${sourceKind === 'lake' ? 'lake' : 'wh'}::${sourceName}` : undefined
+  // Columns available as the LEFT side of a JOIN: the source-table or
+  // primary-ref columns, i.e. whatever the model's main FROM clause
+  // exposes. We don't merge join-target columns here because that's
+  // what the right side resolves separately per-join.
+  const leftJoinColumns = useMemo<string[]>(() => {
+    if (sourceMode === 'ref') {
+      // Use the first ref as the implicit primary alias when joining
+      const primary = refs[0]
+      if (primary && columnsByModel[primary]) {
+        return columnsByModel[primary].map((c) => c.name)
+      }
+      // Fallback: union of all ref columns
+      return Array.from(new Set(refColumns.map((c) => c.name)))
+    }
+    if (sourceKind === 'lake' && sourceName && sourceTable) {
+      const t = lakeTables.find(
+        (x) => (x.namespace || 'default') === sourceName && x.table === sourceTable,
+      )
+      return (t?.columns || []).map((c) => c.name)
+    }
+    return availableColumns.map((c) => c.name)
+  }, [sourceMode, sourceKind, sourceName, sourceTable, lakeTables, availableColumns, refs, columnsByModel, refColumns])
+
+  // Encoded values for the schema dropdown: ``wh::<schema>`` or ``lake::<ns>``.
+  // Always return a string (never undefined) so the underlying Radix Select
+  // stays controlled across its full lifecycle.
+  const schemaSelectValue = sourceName
+    ? `${sourceKind === 'lake' ? 'lake' : 'wh'}::${sourceName}`
+    : ''
 
   const handleSchemaSelect = (encoded: string) => {
     const [kind, ...rest] = encoded.split('::')
@@ -548,7 +590,7 @@ export function VisualQueryBuilder({
               <div className="space-y-1">
                 <Label className="text-xs">Source Table</Label>
                 <Select
-                  value={sourceTable || undefined}
+                  value={sourceTable ?? ''}
                   onValueChange={handleTableSelect}
                   disabled={!sourceName}
                 >
@@ -596,7 +638,7 @@ export function VisualQueryBuilder({
                 <div className="flex-1 space-y-1">
                   <Label className="text-xs">Reference Model</Label>
                   <Select
-                    value={refToAdd || undefined}
+                    value={refToAdd ?? ''}
                     onValueChange={(v) => setRefToAdd(v)}
                     disabled={availableModels.length === 0}
                   >
@@ -707,6 +749,8 @@ export function VisualQueryBuilder({
               availableModels={availableModels}
               joins={joins}
               onChange={setJoins}
+              leftColumns={leftJoinColumns}
+              columnsByModel={columnsByModel}
             />
           </TabsContent>
 

@@ -111,6 +111,12 @@ export function JobBuilderPage() {
   const [dbtSelectExpression, setDbtSelectExpression] = useState<string>('')
   const [dbtTags, setDbtTags] = useState<string>('')
   const [dbtFullRefresh, setDbtFullRefresh] = useState(false)
+  const [dbtSplitByModel, setDbtSplitByModel] = useState(false)
+  const [dbtLayers, setDbtLayers] = useState<string>('')
+  const [dbtModelNames, setDbtModelNames] = useState<string>('')
+  const [dbtUpstreamJobIds, setDbtUpstreamJobIds] = useState<string>('')
+  const [dbtUpstreamTaskRefs, setDbtUpstreamTaskRefs] = useState<string>('')
+  const [dbtDependsOn, setDbtDependsOn] = useState<string>('')
 
   // Load dlt pipelines
   const { data: pipelinesData, isLoading: loadingPipelines } = useQuery({
@@ -166,6 +172,7 @@ export function JobBuilderPage() {
       // Inspect tags for run vs test
       const isTest = existingJob.tags.includes('dbt_test')
       setJobKind(isTest ? 'dbt_test' : 'dbt_run')
+      setDbtSplitByModel(existingJob.tags.includes('split:per_model'))
       const profileTag = existingJob.tags.find((t) =>
         ['profile:lake', 'profile:warehouse', 'profile:default'].includes(t)
       )
@@ -201,6 +208,44 @@ export function JobBuilderPage() {
     setJobName(`dbt_${verb}_${dbtProfile}`)
   }, [jobKind, dbtProfile, isEditing, jobName])
 
+  const parseCsvOrNewlineList = (raw: string): string[] | undefined => {
+    const values = raw
+      .split(/[\n,]/)
+      .map((value) => value.trim())
+      .filter(Boolean)
+    return values.length > 0 ? values : undefined
+  }
+
+  const parseUpstreamTaskRefs = (
+    raw: string
+  ): NonNullable<CreateDbtJobRequest['upstream_task_refs']> | undefined => {
+    const refs = parseCsvOrNewlineList(raw)
+    if (!refs) return undefined
+
+    return refs.map((entry) => {
+      const separator = entry.indexOf(':')
+      if (separator <= 0 || separator >= entry.length - 1) {
+        throw new Error(
+          `Invalid upstream task reference "${entry}". Use job_or_dag:task_id.`
+        )
+      }
+
+      const jobOrDag = entry.slice(0, separator).trim()
+      const taskId = entry.slice(separator + 1).trim()
+
+      if (!jobOrDag || !taskId) {
+        throw new Error(
+          `Invalid upstream task reference "${entry}". Use job_or_dag:task_id.`
+        )
+      }
+
+      return {
+        dag_id: jobOrDag,
+        task_id: taskId,
+      }
+    })
+  }
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const schedule =
@@ -223,6 +268,7 @@ export function JobBuilderPage() {
       }
 
       // dbt_run / dbt_test
+      const splitByModel = dbtSplitByModel
       const data: CreateDbtJobRequest = {
         kind: jobKind === 'dbt_test' ? 'test' : 'run',
         profile: dbtProfile,
@@ -231,11 +277,19 @@ export function JobBuilderPage() {
         schedule,
         retries,
         retry_delay_minutes: 5,
-        select: dbtSelectExpression || undefined,
-        tags: dbtTags
+        select: splitByModel ? undefined : dbtSelectExpression || undefined,
+        tags: splitByModel
+          ? undefined
+          : dbtTags
           ? dbtTags.split(',').map((t) => t.trim()).filter(Boolean)
           : undefined,
         full_refresh: dbtFullRefresh,
+        split_by_model: splitByModel,
+        layers: splitByModel ? parseCsvOrNewlineList(dbtLayers) : undefined,
+        model_names: splitByModel ? parseCsvOrNewlineList(dbtModelNames) : undefined,
+        upstream_job_ids: parseCsvOrNewlineList(dbtUpstreamJobIds),
+        upstream_task_refs: parseUpstreamTaskRefs(dbtUpstreamTaskRefs),
+        depends_on: parseCsvOrNewlineList(dbtDependsOn),
       }
       return isEditing
         ? jobService.update(jobId!, data as unknown as Partial<CreateJobRequest>)
@@ -415,6 +469,48 @@ export function JobBuilderPage() {
               </div>
             )}
 
+            <div className="flex items-center gap-2">
+              <Switch
+                id="splitByModel"
+                checked={dbtSplitByModel}
+                onCheckedChange={setDbtSplitByModel}
+              />
+              <Label htmlFor="splitByModel">Split by model</Label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Creates one task per discovered model. When enabled, model selector and tags are ignored.
+            </p>
+
+            {dbtSplitByModel && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="dbtLayers">Layers (optional)</Label>
+                  <Input
+                    id="dbtLayers"
+                    value={dbtLayers}
+                    onChange={(e) => setDbtLayers(e.target.value)}
+                    placeholder="staging, marts"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Comma-separated dbt model folders to include.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dbtModelNames">Model names (optional)</Label>
+                  <Input
+                    id="dbtModelNames"
+                    value={dbtModelNames}
+                    onChange={(e) => setDbtModelNames(e.target.value)}
+                    placeholder="customers, orders"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Comma-separated model names to include.
+                  </p>
+                </div>
+              </>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="dbtSelect">
                 {jobKind === 'dbt_test' ? 'Test Selector' : 'Model Selector'} (optional)
@@ -423,6 +519,7 @@ export function JobBuilderPage() {
                 id="dbtSelect"
                 value={dbtSelectExpression}
                 onChange={(e) => setDbtSelectExpression(e.target.value)}
+                disabled={dbtSplitByModel}
                 placeholder={
                   jobKind === 'dbt_test'
                     ? 'e.g. orders, source:raw.* (defaults to all)'
@@ -442,6 +539,7 @@ export function JobBuilderPage() {
                     id="dbtTags"
                     value={dbtTags}
                     onChange={(e) => setDbtTags(e.target.value)}
+                    disabled={dbtSplitByModel}
                     placeholder="hourly, marts (comma-separated)"
                   />
                   <p className="text-xs text-muted-foreground">
@@ -458,6 +556,46 @@ export function JobBuilderPage() {
                 </div>
               </>
             )}
+
+            <div className="space-y-2 pt-2">
+              <Label htmlFor="upstreamJobIds">Upstream jobs (optional)</Label>
+              <Input
+                id="upstreamJobIds"
+                value={dbtUpstreamJobIds}
+                onChange={(e) => setDbtUpstreamJobIds(e.target.value)}
+                placeholder="job_uuid_or_dag_id_1, job_uuid_or_dag_id_2"
+              />
+              <p className="text-xs text-muted-foreground">
+                Comma-separated existing job ids or dag ids. New tasks depend on terminal tasks from these jobs.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="upstreamTaskRefs">Upstream task refs (optional)</Label>
+              <Textarea
+                id="upstreamTaskRefs"
+                value={dbtUpstreamTaskRefs}
+                onChange={(e) => setDbtUpstreamTaskRefs(e.target.value)}
+                rows={2}
+                placeholder="job_or_dag:task_id, another_job:task_id"
+              />
+              <p className="text-xs text-muted-foreground">
+                Use job_or_dag:task_id entries, separated by commas or new lines.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="dependsOn">Raw depends_on refs (optional)</Label>
+              <Input
+                id="dependsOn"
+                value={dbtDependsOn}
+                onChange={(e) => setDbtDependsOn(e.target.value)}
+                placeholder="task_id, job:other_dag:task_id"
+              />
+              <p className="text-xs text-muted-foreground">
+                Additional dependency refs appended to created tasks.
+              </p>
+            </div>
           </CardContent>
         </Card>
       )}

@@ -10,11 +10,13 @@ This service provides:
 3. Run monitoring and logging
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 from datetime import datetime
 from uuid import UUID, uuid4
 import logging
 import hashlib
+import re
+from pathlib import Path
 import requests
 
 from app.extensions import db
@@ -27,6 +29,9 @@ from app.domains.orchestration.domain.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+LAYER_EXECUTION_ORDER = ("raw", "staging", "intermediate", "marts")
 
 
 class UnifiedJobService:
@@ -303,6 +308,12 @@ class UnifiedJobService:
         full_refresh: bool = False,
         retries: int = 2,
         retry_delay_minutes: int = 5,
+        split_by_model: bool = False,
+        layers: Optional[List[str]] = None,
+        model_names: Optional[List[str]] = None,
+        upstream_job_ids: Optional[List[str]] = None,
+        upstream_task_refs: Optional[List[Dict[str, str]]] = None,
+        depends_on: Optional[List[str]] = None,
         created_by: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create a Dagster job that runs ``dbt run`` or ``dbt test``.
@@ -317,11 +328,40 @@ class UnifiedJobService:
             tags: Optional list of dbt tag selectors (run only). When
                 provided takes precedence over ``select`` in AssetFactory.
             full_refresh: Run with ``--full-refresh`` (run only).
+            split_by_model: When true, create one dbt task per discovered
+                model (optionally constrained by ``layers`` / ``model_names``)
+                instead of one monolithic task.
+            layers: Optional dbt layers to include when ``split_by_model`` is
+                true (for example: ``["staging", "marts"]``).
+            model_names: Optional model names to include when
+                ``split_by_model`` is true.
+            upstream_job_ids: Optional list of existing DagConfig IDs or
+                ``dag_id`` values. Terminal tasks from each referenced job are
+                encoded as external dependencies.
+            upstream_task_refs: Optional explicit upstream references in the
+                shape ``{"job_id"|"dag_id": "...", "task_id": "..."}``.
+            depends_on: Optional raw dependency references to append directly
+                on created task(s). Supports local task ids and encoded
+                external refs like ``job:<dag_id>:<task_id>``.
         """
         if kind not in ("run", "test"):
             raise ValueError("kind must be 'run' or 'test'")
         if profile not in ("default", "lake", "warehouse"):
             raise ValueError("profile must be one of: default, lake, warehouse")
+        if layers is not None and not isinstance(layers, list):
+            raise ValueError("layers must be a list when provided")
+        if model_names is not None and not isinstance(model_names, list):
+            raise ValueError("model_names must be a list when provided")
+        if upstream_job_ids is not None and not isinstance(upstream_job_ids, list):
+            raise ValueError("upstream_job_ids must be a list when provided")
+        if upstream_task_refs is not None and not isinstance(upstream_task_refs, list):
+            raise ValueError("upstream_task_refs must be a list when provided")
+        if depends_on is not None and not isinstance(depends_on, list):
+            raise ValueError("depends_on must be a list when provided")
+        if split_by_model and tags:
+            raise ValueError("split_by_model cannot be combined with tags")
+        if split_by_model and select:
+            raise ValueError("split_by_model cannot be combined with select")
 
         # Pick TaskType
         if kind == "test":
@@ -336,6 +376,17 @@ class UnifiedJobService:
         else:
             task_type = TaskType.DBT_RUN
             type_tag = "dbt_run"
+
+        external_dependencies = self._resolve_external_dependencies(
+            upstream_job_ids=upstream_job_ids,
+            upstream_task_refs=upstream_task_refs,
+        )
+        manual_dependencies = [
+            str(dep).strip() for dep in (depends_on or []) if str(dep).strip()
+        ]
+        all_root_dependencies = list(dict.fromkeys(
+            [*external_dependencies, *manual_dependencies]
+        ))
 
         # Default job name
         if not name:
@@ -375,35 +426,106 @@ class UnifiedJobService:
             status=DagStatus.ACTIVE,
             default_retries=retries,
             default_retry_delay_minutes=retry_delay_minutes,
-            tags=["dbt", type_tag, f"profile:{profile}"],
+            tags=["dbt", type_tag, f"profile:{profile}"]
+            + (["split:per_model"] if split_by_model else []),
             created_by=created_by or "system",
         )
 
-        # Build task config
-        task_cfg: Dict[str, Any] = {}
-        if select:
-            # For tests AssetFactory reads `select`; for run it reads `models`
-            if kind == "test":
-                task_cfg["select"] = select
-            else:
-                task_cfg["models"] = [select]
-        if tags and kind == "run":
-            task_cfg["tags"] = list(tags)
-        if kind == "run":
-            task_cfg["full_refresh"] = bool(full_refresh)
-
-        task = TaskConfig(
-            dag_config=dag_config,
-            task_id=f"{type_tag}_{profile}",
-            task_type=task_type,
-            config=task_cfg,
-            timeout_minutes=120,
-            retries=retries,
-            retry_delay_minutes=retry_delay_minutes,
-        )
-
         db.session.add(dag_config)
-        db.session.add(task)
+
+        if split_by_model:
+            discovered_models = self._discover_dbt_models(
+                layers=layers,
+                model_names=model_names,
+            )
+            models_by_layer: Dict[str, List[Dict[str, str]]] = {}
+            for model in discovered_models:
+                models_by_layer.setdefault(model["layer"], []).append(model)
+            ordered_layers = self._sort_layers(list(models_by_layer.keys()))
+            layer_index_map = {
+                layer_name: idx for idx, layer_name in enumerate(ordered_layers)
+            }
+
+            previous_layer_task_ids: List[str] = []
+            task_prefix = f"{type_tag}_{profile}" if kind == "run" else type_tag
+
+            for layer_name in ordered_layers:
+                layer_models = sorted(
+                    models_by_layer[layer_name],
+                    key=lambda item: item["model_key"],
+                )
+                current_layer_task_ids: List[str] = []
+
+                for index, model in enumerate(layer_models):
+                    task_id = self._build_model_task_id(
+                        prefix=task_prefix,
+                        layer=layer_name,
+                        model_key=model["model_key"],
+                    )
+
+                    # First layer can depend on external jobs/tasks.
+                    if previous_layer_task_ids:
+                        task_depends_on = list(previous_layer_task_ids)
+                    else:
+                        task_depends_on = list(all_root_dependencies)
+
+                    if kind == "test":
+                        task_cfg = {
+                            "select": model["name"],
+                            "layer": layer_name,
+                            "model_name": model["name"],
+                        }
+                    else:
+                        task_cfg = {
+                            "models": [model["selector"]],
+                            "full_refresh": bool(full_refresh),
+                            "layer": layer_name,
+                            "model_name": model["name"],
+                        }
+
+                    task = TaskConfig(
+                        dag_config=dag_config,
+                        task_id=task_id,
+                        task_type=task_type,
+                        config=task_cfg,
+                        timeout_minutes=120,
+                        retries=retries,
+                        retry_delay_minutes=retry_delay_minutes,
+                        depends_on=task_depends_on,
+                        position_x=100 + (layer_index_map[layer_name] * 300),
+                        position_y=100 + (index * 90),
+                    )
+                    db.session.add(task)
+                    current_layer_task_ids.append(task_id)
+
+                if current_layer_task_ids:
+                    previous_layer_task_ids = current_layer_task_ids
+        else:
+            # Build single-task config.
+            task_cfg: Dict[str, Any] = {}
+            if select:
+                # For tests AssetFactory reads `select`; for run it reads `models`
+                if kind == "test":
+                    task_cfg["select"] = select
+                else:
+                    task_cfg["models"] = [select]
+            if tags and kind == "run":
+                task_cfg["tags"] = list(tags)
+            if kind == "run":
+                task_cfg["full_refresh"] = bool(full_refresh)
+
+            task = TaskConfig(
+                dag_config=dag_config,
+                task_id=f"{type_tag}_{profile}",
+                task_type=task_type,
+                config=task_cfg,
+                timeout_minutes=120,
+                retries=retries,
+                retry_delay_minutes=retry_delay_minutes,
+                depends_on=all_root_dependencies,
+            )
+            db.session.add(task)
+
         db.session.commit()
 
         self._register_job_with_dagster(dag_config)
@@ -925,6 +1047,226 @@ class UnifiedJobService:
         if result.get("tags") is None:
             result["tags"] = []
         return result
+
+    @staticmethod
+    def _sanitize_name_fragment(value: str) -> str:
+        """Sanitize a free-form value into a DAG/task-safe identifier fragment."""
+        normalized = re.sub(r"[^a-z0-9_]", "_", (value or "").lower())
+        normalized = re.sub(r"_+", "_", normalized).strip("_")
+        return normalized or "item"
+
+    def _build_model_task_id(self, prefix: str, layer: str, model_key: str) -> str:
+        """Build a stable task_id for per-model dbt tasks with 64-char guard."""
+        safe_prefix = self._sanitize_name_fragment(prefix)
+        safe_layer = self._sanitize_name_fragment(layer)
+        safe_model = self._sanitize_name_fragment(model_key)
+        base = f"{safe_prefix}_{safe_layer}_{safe_model}"
+        if len(base) <= 64:
+            return base
+
+        digest = hashlib.sha1(base.encode("utf-8")).hexdigest()[:8]
+        truncated = base[:55].rstrip("_")
+        return f"{truncated}_{digest}"
+
+    @staticmethod
+    def _sort_layers(layer_names: List[str]) -> List[str]:
+        """Sort layers in canonical dbt execution order, then alphabetically."""
+        layer_weight = {layer: i for i, layer in enumerate(LAYER_EXECUTION_ORDER)}
+        return sorted(layer_names, key=lambda name: (layer_weight.get(name, 99), name))
+
+    def _resolve_dbt_models_root(self) -> Path:
+        """Resolve dbt models directory from environment and common fallbacks."""
+        candidates: List[Path] = []
+
+        env_project_dir = (self._get_env_value("DBT_PROJECT_DIR") or "").strip()
+        if env_project_dir:
+            candidates.append(Path(env_project_dir) / "models")
+
+        module_parents = list(Path(__file__).resolve().parents)
+        if len(module_parents) > 4:
+            candidates.append(module_parents[4] / "dbt" / "models")
+        if len(module_parents) > 5:
+            candidates.append(module_parents[5] / "dbt" / "models")
+
+        candidates.extend([
+            Path("/app/dbt/models"),
+            Path("./dbt/models"),
+        ])
+
+        for path in candidates:
+            if path.exists() and path.is_dir():
+                return path
+
+        return candidates[0] if candidates else Path("./dbt/models")
+
+    @staticmethod
+    def _get_env_value(key: str) -> Optional[str]:
+        """Read an environment variable lazily without importing os globally."""
+        import os
+        return os.environ.get(key)
+
+    def _discover_dbt_models(
+        self,
+        layers: Optional[List[str]] = None,
+        model_names: Optional[List[str]] = None,
+    ) -> List[Dict[str, str]]:
+        """Discover dbt SQL models grouped by folder layer."""
+        models_root = self._resolve_dbt_models_root()
+        if not models_root.exists() or not models_root.is_dir():
+            raise ValueError(
+                f"Could not find dbt models directory at {models_root}. "
+                "Ensure DBT_PROJECT_DIR is configured."
+            )
+
+        layer_filter: Optional[Set[str]] = None
+        if layers:
+            layer_filter = {
+                self._sanitize_name_fragment(layer)
+                for layer in layers
+                if str(layer).strip()
+            }
+
+        model_filter: Optional[Set[str]] = None
+        if model_names:
+            model_filter = {
+                self._sanitize_name_fragment(model_name)
+                for model_name in model_names
+                if str(model_name).strip()
+            }
+
+        discovered: List[Dict[str, str]] = []
+        for sql_file in models_root.rglob("*.sql"):
+            if sql_file.name.startswith("_"):
+                continue
+
+            relative_path = sql_file.relative_to(models_root)
+            relative_posix = relative_path.as_posix()
+            layer_name = (
+                self._sanitize_name_fragment(relative_path.parts[0])
+                if len(relative_path.parts) > 1
+                else "default"
+            )
+            model_name = sql_file.stem
+            model_name_norm = self._sanitize_name_fragment(model_name)
+
+            if layer_filter and layer_name not in layer_filter:
+                continue
+            if model_filter and model_name_norm not in model_filter:
+                continue
+
+            discovered.append({
+                "name": model_name,
+                "layer": layer_name,
+                "model_key": str(relative_path.with_suffix("")).replace("\\", "/"),
+                "selector": f"path:models/{relative_posix}",
+            })
+
+        if not discovered:
+            raise ValueError(
+                "No dbt models found for the requested filters. "
+                "Check layers/model_names and ensure SQL models exist under dbt/models."
+            )
+
+        return discovered
+
+    @staticmethod
+    def _encode_external_dependency(dag_id: str, task_id: str) -> str:
+        """Encode a cross-job dependency in a compact string form."""
+        return f"job:{dag_id}:{task_id}"
+
+    def _find_job_for_dependency(self, job_identifier: str) -> Optional[DagConfig]:
+        """Find an existing job by UUID id or dag_id for dependency wiring."""
+        if not job_identifier:
+            return None
+
+        query = DagConfig.query.filter(
+            DagConfig.tenant_id == self.tenant_id,
+            DagConfig.status != DagStatus.ARCHIVED,
+        )
+
+        dag: Optional[DagConfig] = None
+        try:
+            dag_uuid = UUID(str(job_identifier))
+            dag = query.filter(DagConfig.id == dag_uuid).first()
+        except (ValueError, TypeError, AttributeError):
+            dag = None
+
+        if not dag:
+            dag = query.filter(DagConfig.dag_id == str(job_identifier)).first()
+
+        return dag
+
+    @staticmethod
+    def _get_terminal_task_ids(dag: DagConfig) -> List[str]:
+        """Return task ids that are not depended on by any local task."""
+        tasks = list(dag.tasks or [])
+        if not tasks:
+            return []
+
+        task_ids = {task.task_id for task in tasks}
+        depended_on: Set[str] = set()
+        for task in tasks:
+            for dep in (task.depends_on or []):
+                if dep in task_ids:
+                    depended_on.add(dep)
+
+        terminal = [task.task_id for task in tasks if task.task_id not in depended_on]
+        if terminal:
+            return sorted(terminal)
+        return sorted(task_ids)
+
+    def _resolve_external_dependencies(
+        self,
+        upstream_job_ids: Optional[List[str]] = None,
+        upstream_task_refs: Optional[List[Dict[str, str]]] = None,
+    ) -> List[str]:
+        """Resolve dependency references to encoded external task refs."""
+        resolved: List[str] = []
+
+        for job_identifier in (upstream_job_ids or []):
+            dag = self._find_job_for_dependency(str(job_identifier))
+            if not dag:
+                raise ValueError(f"Upstream job not found: {job_identifier}")
+
+            terminal_task_ids = self._get_terminal_task_ids(dag)
+            if not terminal_task_ids:
+                raise ValueError(
+                    f"Upstream job '{dag.dag_id}' has no tasks to depend on"
+                )
+
+            for task_id in terminal_task_ids:
+                resolved.append(self._encode_external_dependency(dag.dag_id, task_id))
+
+        for item in (upstream_task_refs or []):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    "Each upstream_task_refs entry must be an object with "
+                    "job_id or dag_id, and task_id"
+                )
+
+            job_identifier = item.get("job_id") or item.get("dag_id")
+            task_id = str(item.get("task_id") or "").strip()
+
+            if not job_identifier or not task_id:
+                raise ValueError(
+                    "Each upstream_task_refs entry must include job_id/dag_id "
+                    "and task_id"
+                )
+
+            dag = self._find_job_for_dependency(str(job_identifier))
+            if not dag:
+                raise ValueError(f"Upstream job not found: {job_identifier}")
+
+            dag_task_ids = {task.task_id for task in (dag.tasks or [])}
+            if task_id not in dag_task_ids:
+                raise ValueError(
+                    f"Task '{task_id}' not found in upstream job '{dag.dag_id}'"
+                )
+
+            resolved.append(self._encode_external_dependency(dag.dag_id, task_id))
+
+        # Preserve order while de-duplicating
+        return list(dict.fromkeys(resolved))
 
     def _get_dagster_job_name(self, dag: DagConfig) -> str:
         """Return the Dagster job name registered for a DagConfig.

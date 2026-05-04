@@ -1,0 +1,35 @@
+name: novasight_hnh
+version: 1.0.0
+config-version: 2
+profile: novasight_hnh
+model-paths:
+- models
+analysis-paths:
+- analyses
+test-paths:
+- tests
+seed-paths:
+- seeds
+macro-paths:
+- macros
+snapshot-paths:
+- snapshots
+target-path: target
+clean-targets:
+- target
+- dbt_packages
+vars:
+  tenant_id: a569bff5-27af-40e2-9a58-ad286d59d9b2
+  tenant_slug: hnh
+  source_database: tenant_hnh
+  target_database: dbt_tenant_hnh
+models:
+  novasight_hnh:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: ephemeral
+    marts:
+      +materialized: table
+      +schema: marts

@@ -221,6 +221,14 @@ def create_dbt_job():
         - select: Optional dbt --select expression (models or tests)
         - tags: Optional list of dbt tag selectors (run only)
         - full_refresh: Run with --full-refresh (run only, default: false)
+                - split_by_model: Create one task per discovered model (default: false)
+                - layers: Optional layer filter when split_by_model=true
+                - model_names: Optional model-name filter when split_by_model=true
+                - upstream_job_ids: Optional list of existing job ids/dag_ids to depend on
+                - upstream_task_refs: Optional explicit upstream task references
+                    ({job_id|dag_id, task_id})
+                - depends_on: Optional raw dependency references (task ids or
+                    job:<dag_id>:<task_id>)
         - retries: Number of retries on failure (default: 2)
         - retry_delay_minutes: Minutes between retries (default: 5)
 
@@ -256,6 +264,12 @@ def create_dbt_job():
             select=data.get("select"),
             tags=data.get("tags"),
             full_refresh=bool(data.get("full_refresh", False)),
+            split_by_model=bool(data.get("split_by_model", False)),
+            layers=data.get("layers"),
+            model_names=data.get("model_names"),
+            upstream_job_ids=data.get("upstream_job_ids"),
+            upstream_task_refs=data.get("upstream_task_refs"),
+            depends_on=data.get("depends_on"),
             retries=data.get("retries", 2),
             retry_delay_minutes=data.get("retry_delay_minutes", 5),
             created_by=user_id,

@@ -8,7 +8,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Book,
-  Code2,
   Users,
   Shield,
   Upload,
@@ -30,13 +29,17 @@ const mainNavigation = [
 // Orchestrate your Data section
 const orchestrateNavigation = [
   { name: 'Extract & Load', href: '/app/pipelines', icon: Upload },
-  { name: 'Scheduling', href: '/app/jobs', icon: Calendar },
   { name: 'Transform', href: '/app/dbt-studio', icon: GitBranch },
-  { name: 'SQL Editor', href: '/app/sql', icon: Code2 },
   { name: 'Datasets', href: '/app/datasets', icon: Layers },
   { name: 'Charts', href: '/app/charts', icon: PieChart },
   { name: 'Dashboards', href: '/app/dashboards', icon: LayoutDashboard },
 ]
+
+// Scheduling section (separated from Orchestrate)
+const schedulingNavigation = [
+  { name: 'Scheduling', href: '/app/jobs', icon: Calendar },
+]
+
 
 // AI-powered navigation (special highlight)
 const aiNavigation = {
@@ -143,6 +146,16 @@ export function Sidebar() {
             </p>
           )}
           {orchestrateNavigation.map((item) => renderNavItem(item))}
+        </div>
+
+        {/* Scheduling */}
+        <div>
+          {!collapsed && (
+            <p className="px-3 mb-2 text-xs font-semibold uppercase text-muted-foreground tracking-wider">
+              Scheduling
+            </p>
+          )}
+          {schedulingNavigation.map((item) => renderNavItem(item))}
         </div>
 
         {/* Ask AI - Special Highlight */}

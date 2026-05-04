@@ -42,7 +42,10 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       accessToken: null,
       isAuthenticated: false,
-      isLoading: false,
+      // Start in "loading" mode if a token exists in storage so route
+      // guards wait for initializeFromStorage() to finish (e.g. when the
+      // app boots in a new tab).
+      isLoading: typeof window !== 'undefined' && !!localStorage.getItem('novasight_access_token'),
       error: null,
       rememberMe: false,
 

@@ -98,6 +98,22 @@ export interface CreateDbtJobRequest {
   tags?: string[]
   /** Run with --full-refresh (run only) */
   full_refresh?: boolean
+  /** Create one task per discovered dbt model. */
+  split_by_model?: boolean
+  /** Optional dbt layers to include when split_by_model=true. */
+  layers?: string[]
+  /** Optional model names to include when split_by_model=true. */
+  model_names?: string[]
+  /** Existing jobs to depend on (job id or dag_id). */
+  upstream_job_ids?: string[]
+  /** Explicit upstream task refs ({ job_id|dag_id, task_id }). */
+  upstream_task_refs?: Array<{
+    job_id?: string
+    dag_id?: string
+    task_id: string
+  }>
+  /** Raw dependency refs (task_id or job:<dag_id>:<task_id>). */
+  depends_on?: string[]
   retries?: number
   retry_delay_minutes?: number
 }

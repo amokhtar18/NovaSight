@@ -59,6 +59,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { SQLEditor } from '../components/SQLEditor'
 import { SQLResultsChart } from '../components/SQLResultsChart'
 import { SchemaExplorer } from '../components/SchemaExplorer'
@@ -89,14 +90,12 @@ export function SqlEditorPage() {
   const [queryLimit, setQueryLimit] = useState(200)
   
   // Panel states
-  const [savedQueriesPanelOpen, setSavedQueriesPanelOpen] = useState(true)
-  const [savedQueriesPanelWidth, setSavedQueriesPanelWidth] = useState(288) // 72 * 4 = 288px (w-72)
+  const [viewTab, setViewTab] = useState<'editor' | 'saved'>('editor')
   const [schemaExplorerPanelOpen, setSchemaExplorerPanelOpen] = useState(true)
   const [schemaExplorerPanelWidth, setSchemaExplorerPanelWidth] = useState(288) // 72 * 4 = 288px (w-72)
   const [searchQuery, setSearchQuery] = useState('')
   
   // Resize refs
-  const isResizingSavedQueries = useRef(false)
   const isResizingSchemaExplorer = useRef(false)
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all')
   
@@ -337,6 +336,9 @@ export function SqlEditorPage() {
 
   // Edit saved query - open in new tab
   const handleEditSavedQuery = useCallback((query: SavedQuery) => {
+    // Switch to editor view
+    setViewTab('editor')
+
     // Check if query is already open in a tab
     const existingTab = tabs.find(t => t.savedQueryId === query.id)
     if (existingTab) {
@@ -467,34 +469,6 @@ export function SqlEditorPage() {
   }, [])
 
   // Resize handlers for panels
-  const handleSavedQueriesResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    isResizingSavedQueries.current = true
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-    
-    const startX = e.clientX
-    const startWidth = savedQueriesPanelWidth
-    
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizingSavedQueries.current) return
-      const diff = e.clientX - startX
-      const newWidth = Math.max(200, Math.min(500, startWidth + diff))
-      setSavedQueriesPanelWidth(newWidth)
-    }
-    
-    const handleMouseUp = () => {
-      isResizingSavedQueries.current = false
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-    
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-  }, [savedQueriesPanelWidth])
-
   const handleSchemaExplorerResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     isResizingSchemaExplorer.current = true
@@ -615,223 +589,231 @@ export function SqlEditorPage() {
           </div>
         </div>
 
-        {/* Query Tabs */}
-        <QueryTabs
-          tabs={tabs}
-          activeTabId={activeTabId}
-          onTabChange={setActiveTabId}
-          onTabClose={handleCloseTab}
-          onNewTab={handleNewTab}
-          onTabRename={handleRenameTab}
-        />
-
-        {/* Main Content */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Toggle Saved Queries Button - Left side */}
-          <button
-            onClick={() => setSavedQueriesPanelOpen(!savedQueriesPanelOpen)}
-            className="w-5 flex-shrink-0 bg-muted/50 hover:bg-muted border-r flex items-center justify-center transition-colors"
-            title={savedQueriesPanelOpen ? "Collapse saved queries" : "Expand saved queries"}
-          >
-            {savedQueriesPanelOpen ? (
-              <ChevronLeft className="h-4 w-4 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            )}
-          </button>
-
-          {/* Saved Queries Panel - Left */}
-          <div 
-            className={cn(
-              "bg-card flex flex-col relative",
-              savedQueriesPanelOpen ? "" : "w-0 overflow-hidden"
-            )}
-            style={savedQueriesPanelOpen ? { width: savedQueriesPanelWidth } : undefined}
-          >
-            {savedQueriesPanelOpen && (
-              <>
-                {/* Panel Header */}
-                <div className="p-3 border-b">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <FileCode className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium text-sm">Saved Queries</span>
-                    </div>
-                    <Badge variant="secondary" className="text-xs">
-                      {filteredQueries.length}
-                    </Badge>
-                  </div>
-                  
-                  {/* Search */}
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                    <Input
-                      placeholder="Search queries..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-8 h-8 text-sm"
-                    />
-                  </div>
-                  
-                  {/* Type Filter */}
-                  <Select value={selectedTypeFilter} onValueChange={setSelectedTypeFilter}>
-                    <SelectTrigger className="h-8 mt-2 text-xs">
-                      <SelectValue placeholder="All types" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Types</SelectItem>
-                      <SelectItem value="adhoc">Ad-hoc</SelectItem>
-                      <SelectItem value="pyspark">PySpark</SelectItem>
-                      <SelectItem value="dbt">dbt</SelectItem>
-                      <SelectItem value="report">Report</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Queries List */}
-                <ScrollArea className="flex-1">
-                  <div className="p-2 space-y-1">
-                    {savedQueriesLoading ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : filteredQueries.length === 0 ? (
-                      <div className="text-center py-8 px-4">
-                        <FileCode className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                        <p className="text-sm text-muted-foreground">
-                          {searchQuery ? 'No queries match your search' : 'No saved queries yet'}
-                        </p>
-                      </div>
-                    ) : (
-                      filteredQueries.map((query) => (
-                        <SavedQueryItem
-                          key={query.id}
-                          query={query}
-                          isActive={activeTab.savedQueryId === query.id}
-                          onEdit={() => handleEditSavedQuery(query)}
-                          onCopy={() => handleCopySql(query)}
-                          onDelete={() => {
-                            setQueryToDelete(query)
-                            setDeleteDialogOpen(true)
-                          }}
-                        />
-                      ))
-                    )}
-                  </div>
-                </ScrollArea>
-                
-                {/* Resize Handle */}
-                <div
-                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 active:bg-primary/70 transition-colors"
-                  onMouseDown={handleSavedQueriesResizeStart}
-                />
-              </>
-            )}
+        {/* View Tabs: SQL Editor / Saved Queries */}
+        <Tabs
+          value={viewTab}
+          onValueChange={(v) => setViewTab(v as 'editor' | 'saved')}
+          className="flex-1 flex flex-col overflow-hidden"
+        >
+          <div className="px-4 pt-2 border-b bg-card">
+            <TabsList>
+              <TabsTrigger value="editor" className="gap-2">
+                <Database className="h-4 w-4" />
+                SQL Editor
+              </TabsTrigger>
+              <TabsTrigger value="saved" className="gap-2">
+                <FileCode className="h-4 w-4" />
+                Saved Queries
+                <Badge variant="secondary" className="ml-1 text-xs">
+                  {savedQueries.length}
+                </Badge>
+              </TabsTrigger>
+            </TabsList>
           </div>
 
-          {/* Editor Area */}
-          {!selectedDatasourceId ? (
-            <div className="flex-1 flex items-center justify-center">
-              <Alert className="max-w-md">
-                <Database className="h-4 w-4" />
-                <AlertDescription>
-                  Select a data source to start writing SQL queries.
-                </AlertDescription>
-              </Alert>
-            </div>
-          ) : (
-            <div className="flex-1 flex overflow-hidden">
-              {/* Schema Explorer - Collapsible */}
-              {/* Toggle Schema Explorer Button - positioned before explorer to avoid covering buttons */}
-              <button
-                onClick={() => setSchemaExplorerPanelOpen(!schemaExplorerPanelOpen)}
-                className="w-5 flex-shrink-0 bg-muted/50 hover:bg-muted border-r flex items-center justify-center transition-colors z-10"
-                title={schemaExplorerPanelOpen ? "Collapse schema explorer" : "Expand schema explorer"}
-              >
-                {schemaExplorerPanelOpen ? (
-                  <ChevronLeft className="h-4 w-4 text-muted-foreground" />
-                ) : (
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                )}
-              </button>
+          {/* SQL Editor Tab */}
+          <TabsContent
+            value="editor"
+            className="flex-1 flex flex-col overflow-hidden mt-0 data-[state=inactive]:hidden"
+          >
+            {/* Query Tabs */}
+            <QueryTabs
+              tabs={tabs}
+              activeTabId={activeTabId}
+              onTabChange={setActiveTabId}
+              onTabClose={handleCloseTab}
+              onNewTab={handleNewTab}
+              onTabRename={handleRenameTab}
+            />
 
-              {/* Schema Explorer Panel */}
-              <div 
-                className={cn(
-                  "flex-shrink-0 bg-card relative",
-                  schemaExplorerPanelOpen ? "" : "w-0 overflow-hidden"
-                )}
-                style={schemaExplorerPanelOpen ? { width: schemaExplorerPanelWidth } : undefined}
-              >
-                {schemaExplorerPanelOpen && (
-                  <>
-                    <SchemaExplorer
-                      schemas={schemas}
-                      isLoading={schemaLoading}
-                      error={schemaError}
-                      onRefresh={() => refetchSchema()}
-                      onColumnClick={handleColumnClick}
-                      onInsertSelect={handleInsertSelect}
-                      className="h-full"
-                    />
-                    {/* Resize Handle */}
-                    <div
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 active:bg-primary/70 transition-colors"
-                      onMouseDown={handleSchemaExplorerResizeStart}
-                    />
-                  </>
-                )}
+            {/* Editor Area */}
+            {!selectedDatasourceId ? (
+              <div className="flex-1 flex items-center justify-center">
+                <Alert className="max-w-md">
+                  <Database className="h-4 w-4" />
+                  <AlertDescription>
+                    Select a data source to start writing SQL queries.
+                  </AlertDescription>
+                </Alert>
               </div>
-
-              {/* Editor and Results */}
-              <div className="flex-1 flex flex-col overflow-hidden">
-                {/* SQL Editor */}
-                <div className="h-2/5 min-h-[200px] border-b">
-                  <Suspense fallback={
-                    <div className="flex items-center justify-center h-full">
-                      <Loader2 className="h-6 w-6 animate-spin" />
-                    </div>
-                  }>
-                    <SQLEditor
-                      value={activeTab.sql}
-                      onChange={updateTabSql}
-                      onExecute={handleExecute}
-                      isExecuting={queryLoading}
-                      executionTime={result?.executionTimeMs}
-                      rowCount={result?.rowCount}
-                      schemas={schemas}
-                      queryLimit={queryLimit}
-                      onQueryLimitChange={setQueryLimit}
-                      className="h-full"
-                    />
-                  </Suspense>
-                </div>
-
-                {/* Results */}
-                <div className="flex-1 overflow-hidden bg-card">
-                  {error ? (
-                    <div className="p-4">
-                      <Alert variant="destructive">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertDescription>
-                          <pre className="mt-2 text-sm whitespace-pre-wrap">{error}</pre>
-                        </AlertDescription>
-                      </Alert>
-                    </div>
-                  ) : result ? (
-                    <SQLResultsChart result={result} sqlQuery={activeTab.sql} className="h-full" />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
-                      <Play className="h-8 w-8" />
-                      <p>Run a query to see results</p>
-                      <p className="text-xs">Press Ctrl+Enter or click Run</p>
-                    </div>
+            ) : (
+              <div className="flex-1 flex overflow-hidden relative">
+                {/* Schema Explorer Panel */}
+                <div
+                  className={cn(
+                    "flex-shrink-0 bg-card relative border-r",
+                    schemaExplorerPanelOpen ? "" : "w-0 overflow-hidden border-r-0"
+                  )}
+                  style={schemaExplorerPanelOpen ? { width: schemaExplorerPanelWidth } : undefined}
+                >
+                  {schemaExplorerPanelOpen && (
+                    <>
+                      <SchemaExplorer
+                        schemas={schemas}
+                        isLoading={schemaLoading}
+                        error={schemaError}
+                        onRefresh={() => refetchSchema()}
+                        onColumnClick={handleColumnClick}
+                        onInsertSelect={handleInsertSelect}
+                        className="h-full"
+                      />
+                      {/* Collapse Button - bottom right */}
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setSchemaExplorerPanelOpen(false)}
+                        title="Collapse schema explorer"
+                        className="absolute bottom-2 right-3 h-7 w-7 z-20 shadow-sm"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      {/* Resize Handle */}
+                      <div
+                        className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 active:bg-primary/70 transition-colors"
+                        onMouseDown={handleSchemaExplorerResizeStart}
+                      />
+                    </>
                   )}
                 </div>
+
+                {/* Expand Schema Explorer Button (when collapsed) */}
+                {!schemaExplorerPanelOpen && (
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setSchemaExplorerPanelOpen(true)}
+                    title="Expand schema explorer"
+                    className="absolute bottom-2 left-2 h-7 w-7 z-20 shadow-sm"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                )}
+
+                {/* Editor and Results */}
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  {/* SQL Editor */}
+                  <div className="h-2/5 min-h-[200px] border-b">
+                    <Suspense fallback={
+                      <div className="flex items-center justify-center h-full">
+                        <Loader2 className="h-6 w-6 animate-spin" />
+                      </div>
+                    }>
+                      <SQLEditor
+                        value={activeTab.sql}
+                        onChange={updateTabSql}
+                        onExecute={handleExecute}
+                        isExecuting={queryLoading}
+                        executionTime={result?.executionTimeMs}
+                        rowCount={result?.rowCount}
+                        schemas={schemas}
+                        queryLimit={queryLimit}
+                        onQueryLimitChange={setQueryLimit}
+                        className="h-full"
+                      />
+                    </Suspense>
+                  </div>
+
+                  {/* Results */}
+                  <div className="flex-1 overflow-hidden bg-card">
+                    {error ? (
+                      <div className="p-4">
+                        <Alert variant="destructive">
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertDescription>
+                            <pre className="mt-2 text-sm whitespace-pre-wrap">{error}</pre>
+                          </AlertDescription>
+                        </Alert>
+                      </div>
+                    ) : result ? (
+                      <SQLResultsChart result={result} sqlQuery={activeTab.sql} className="h-full" />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
+                        <Play className="h-8 w-8" />
+                        <p>Run a query to see results</p>
+                        <p className="text-xs">Press Ctrl+Enter or click Run</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
+            )}
+          </TabsContent>
+
+          {/* Saved Queries Tab */}
+          <TabsContent
+            value="saved"
+            className="flex-1 flex flex-col overflow-hidden mt-0 data-[state=inactive]:hidden"
+          >
+            {/* Toolbar */}
+            <div className="flex items-center gap-3 p-3 border-b bg-card">
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Search queries by name or description..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 h-9 text-sm"
+                />
+              </div>
+              <Select value={selectedTypeFilter} onValueChange={setSelectedTypeFilter}>
+                <SelectTrigger className="h-9 w-[160px] text-sm">
+                  <SelectValue placeholder="All types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="adhoc">Ad-hoc</SelectItem>
+                  <SelectItem value="pyspark">PySpark</SelectItem>
+                  <SelectItem value="dbt">dbt</SelectItem>
+                  <SelectItem value="report">Report</SelectItem>
+                </SelectContent>
+              </Select>
+              <Badge variant="secondary" className="text-xs">
+                {filteredQueries.length} {filteredQueries.length === 1 ? 'query' : 'queries'}
+              </Badge>
             </div>
-          )}
-        </div>
+
+            {/* Queries Grid */}
+            <ScrollArea className="flex-1">
+              <div className="p-4">
+                {savedQueriesLoading ? (
+                  <div className="flex items-center justify-center py-16">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : filteredQueries.length === 0 ? (
+                  <div className="text-center py-16 px-4">
+                    <FileCode className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm font-medium">
+                      {searchQuery || selectedTypeFilter !== 'all'
+                        ? 'No queries match your filters'
+                        : 'No saved queries yet'}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {searchQuery || selectedTypeFilter !== 'all'
+                        ? 'Try adjusting your search or filter'
+                        : 'Save a query from the SQL Editor to see it here'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {filteredQueries.map((query) => (
+                      <SavedQueryItem
+                        key={query.id}
+                        query={query}
+                        isActive={activeTab.savedQueryId === query.id}
+                        onEdit={() => handleEditSavedQuery(query)}
+                        onCopy={() => handleCopySql(query)}
+                        onDelete={() => {
+                          setQueryToDelete(query)
+                          setDeleteDialogOpen(true)
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
+        </Tabs>
 
         {/* Save Dialog */}
         <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>

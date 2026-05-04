@@ -116,6 +116,14 @@ export const warehouseApi = {
     })
     return data
   },
+
+  /** List output columns for a saved dbt model by name (used by ref()). */
+  listModelColumns: async (modelName: string): Promise<WarehouseColumn[]> => {
+    const { data } = await apiClient.get(
+      `${BASE}/visual-models/by-name/${encodeURIComponent(modelName)}/columns`,
+    )
+    return data
+  },
 }
 
 // ═══════════════════════════════════════════════════════════════

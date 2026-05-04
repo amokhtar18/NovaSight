@@ -72,14 +72,18 @@ renamed AS (
 {% for col in columns %}
 {% if col.name != primary_key and col.name != (tenant_column | default('tenant_id')) %}
         -- {{ col.description | default(col.name) }}
-{% if col.cast is defined and col.cast %}
-        CAST({{ col.source_name | default(col.name) }} AS {{ col.cast }}) AS {{ col.alias | default(col.name) }}{% if not loop.last %},{% endif %}
+{% set src_col = col.source_column or col.source_name or col.name %}
+{% if col.cast %}
+        CAST({{ src_col }} AS {{ col.cast }}) AS {{ col.alias or col.name }}{% if not loop.last %},{% endif %}
 
-{% elif col.alias is defined and col.alias != col.name %}
-        {{ col.source_name | default(col.name) }} AS {{ col.alias }}{% if not loop.last %},{% endif %}
+{% elif col.alias and col.alias != col.name %}
+        {{ src_col }} AS {{ col.alias }}{% if not loop.last %},{% endif %}
+
+{% elif src_col != col.name %}
+        {{ src_col }} AS {{ col.name }}{% if not loop.last %},{% endif %}
 
 {% else %}
-        {{ col.source_name | default(col.name) }}{% if not loop.last %},{% endif %}
+        {{ col.name }}{% if not loop.last %},{% endif %}
 
 {% endif %}
 {% endif %}

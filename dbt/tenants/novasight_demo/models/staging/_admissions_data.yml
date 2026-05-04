@@ -1,0 +1,72 @@
+
+# ============================================================================
+# NovaSight Generated dbt Schema: admissions_data
+# Generated: 2026-05-04T13:22:52.021840
+# Template: dbt/schema.yml.j2 v1.0.0
+# WARNING: Auto-generated file - do not edit manually
+# ============================================================================
+
+version: 2
+
+models:
+  - name: admissions_data
+
+
+
+
+    tags:
+
+      - admission
+
+      - inpatients
+
+
+
+    columns:
+
+      - name: admission_no
+
+
+        data_type: String
+
+
+
+
+
+      - name: patient_id
+
+
+        data_type: String
+
+
+
+
+
+      - name: episode_no
+
+
+        data_type: String
+
+
+
+
+
+      - name: admit_date
+
+
+        data_type: String
+
+
+
+
+
+      - name: physical_discharge_date
+
+
+        data_type: String
+
+
+
+
+
+

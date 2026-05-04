@@ -115,12 +115,18 @@ class TenantDbtProjectManager:
         if not tenant:
             raise TenantDbtProjectError(f"Tenant not found: {identity.tenant_id}")
         
-        # Get ClickHouse config from environment
+        # Get ClickHouse config from environment.
+        #
+        # NOTE: ``CLICKHOUSE_PORT`` is the native protocol port used by the
+        # rest of the platform (clickhouse-driver, port 9000). dbt-clickhouse
+        # speaks the HTTP protocol and needs port 8123. We therefore prefer
+        # ``DBT_CLICKHOUSE_PORT`` and only fall back to the well-known HTTP
+        # default (8123) — never to ``CLICKHOUSE_PORT``.
         return cls(
             tenant_id=str(tenant.id),
             tenant_slug=tenant.slug,
             clickhouse_host=os.getenv('CLICKHOUSE_HOST', 'clickhouse'),
-            clickhouse_port=int(os.getenv('CLICKHOUSE_PORT', 8123)),
+            clickhouse_port=int(os.getenv('DBT_CLICKHOUSE_PORT', '8123')),
             clickhouse_user=os.getenv('CLICKHOUSE_USER', 'default'),
             clickhouse_password=os.getenv('CLICKHOUSE_PASSWORD', ''),
         )
@@ -309,7 +315,7 @@ class TenantDbtProjectManager:
                         'type': 'clickhouse',
                         'schema': self.target_database,
                         'host': "{{ env_var('CLICKHOUSE_HOST') }}",
-                        'port': "{{ env_var('CLICKHOUSE_PORT', 8123) | int }}",
+                        'port': "{{ env_var('DBT_CLICKHOUSE_PORT', '8123') | int }}",
                         'user': "{{ env_var('CLICKHOUSE_USER') }}",
                         'password': "{{ env_var('CLICKHOUSE_PASSWORD') }}",
                         'secure': True,

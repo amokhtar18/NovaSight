@@ -84,8 +84,11 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       if (onSuccess) {
         onSuccess()
       } else {
-        const from = (location.state as { from?: string })?.from || '/app/dashboard'
-        navigate(from, { replace: true })
+        const stateFrom = (location.state as { from?: string })?.from
+        const params = new URLSearchParams(location.search)
+        const redirect = params.get('redirect')
+        const target = stateFrom || redirect || '/app/dashboard'
+        navigate(target, { replace: true })
       }
     } catch (err: unknown) {
       if (err instanceof Error) {

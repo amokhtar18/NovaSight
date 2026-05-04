@@ -1,0 +1,1 @@
+{"_invocation_id": "1a679113-84f9-4e3f-a740-e05f025173f9", "linked": {"0": {"name": "model.novasight_novasight_demo.audit_smoke_mart", "type": "model"}, "1": {"name": "model.novasight_novasight_demo.audit_smoke", "type": "model", "succ": [0, 2]}, "2": {"name": "test.novasight_novasight_demo.audit_smoke_id_positive", "type": "test"}}}

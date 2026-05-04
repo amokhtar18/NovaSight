@@ -19,6 +19,17 @@ export interface JoinBuilderProps {
   availableModels: string[]
   joins: VisualJoinConfig[]
   onChange: (joins: VisualJoinConfig[]) => void
+  /**
+   * Columns available on the LEFT side of every join — i.e. the
+   * columns of the model's primary source (source table or first
+   * ref()). Used to populate the ``Left Column`` dropdown.
+   */
+  leftColumns?: string[]
+  /**
+   * Map of model name → columns. Used to populate the ``Right Column``
+   * dropdown for each join based on the selected ``source_model``.
+   */
+  columnsByModel?: Record<string, Array<{ name: string; type?: string; comment?: string }>>
 }
 
 const JOIN_LABELS: Record<JoinType, string> = {
@@ -38,7 +49,13 @@ function emptyJoin(): VisualJoinConfig {
   }
 }
 
-export function JoinBuilder({ availableModels, joins, onChange }: JoinBuilderProps) {
+export function JoinBuilder({
+  availableModels,
+  joins,
+  onChange,
+  leftColumns = [],
+  columnsByModel = {},
+}: JoinBuilderProps) {
   const addJoin = () => onChange([...joins, emptyJoin()])
 
   const updateJoin = (index: number, partial: Partial<VisualJoinConfig>) => {
@@ -133,22 +150,76 @@ export function JoinBuilder({ availableModels, joins, onChange }: JoinBuilderPro
                 <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-end">
                   <div className="space-y-1">
                     <Label className="text-xs">Left Column</Label>
-                    <Input
-                      value={join.left_key}
-                      onChange={(e) => updateJoin(idx, { left_key: e.target.value })}
-                      placeholder="customer_id"
-                      className="h-8 text-xs font-mono"
-                    />
+                    {leftColumns.length > 0 ? (
+                      <Select
+                        value={join.left_key || undefined}
+                        onValueChange={(v) => updateJoin(idx, { left_key: v })}
+                      >
+                        <SelectTrigger className="h-8 text-xs font-mono">
+                          <SelectValue placeholder="Select column" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {leftColumns.map((col) => (
+                            <SelectItem
+                              key={col}
+                              value={col}
+                              className="text-xs font-mono"
+                            >
+                              {col}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        value={join.left_key}
+                        onChange={(e) => updateJoin(idx, { left_key: e.target.value })}
+                        placeholder="customer_id"
+                        className="h-8 text-xs font-mono"
+                      />
+                    )}
                   </div>
                   <span className="text-xs text-muted-foreground pb-2">=</span>
                   <div className="space-y-1">
                     <Label className="text-xs">Right Column</Label>
-                    <Input
-                      value={join.right_key}
-                      onChange={(e) => updateJoin(idx, { right_key: e.target.value })}
-                      placeholder="id"
-                      className="h-8 text-xs font-mono"
-                    />
+                    {(() => {
+                      const rightCols =
+                        join.source_model && columnsByModel[join.source_model]
+                          ? columnsByModel[join.source_model]!.map((c) => c.name)
+                          : []
+                      if (rightCols.length > 0) {
+                        return (
+                          <Select
+                            value={join.right_key || undefined}
+                            onValueChange={(v) => updateJoin(idx, { right_key: v })}
+                          >
+                            <SelectTrigger className="h-8 text-xs font-mono">
+                              <SelectValue placeholder="Select column" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {rightCols.map((col) => (
+                                <SelectItem
+                                  key={col}
+                                  value={col}
+                                  className="text-xs font-mono"
+                                >
+                                  {col}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )
+                      }
+                      return (
+                        <Input
+                          value={join.right_key}
+                          onChange={(e) => updateJoin(idx, { right_key: e.target.value })}
+                          placeholder={join.source_model ? 'id' : 'pick a model first'}
+                          className="h-8 text-xs font-mono"
+                          disabled={!join.source_model}
+                        />
+                      )
+                    })()}
                   </div>
                 </div>
               )}

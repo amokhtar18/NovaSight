@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Bell, Moon, Sun, LogOut, User, Settings, Shield } from 'lucide-react'
+import { Bell, Moon, Sun, LogOut, User, Settings, Shield, Code2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 export function Header() {
@@ -37,6 +37,24 @@ export function Header() {
 
       {/* Right side - Actions */}
       <div className="flex items-center gap-2">
+        {/* SQL Editor - opens in new tab */}
+        <Button
+          variant="outline"
+          size="sm"
+          asChild
+          className="gap-2 border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 to-teal-500/10 text-emerald-700 dark:text-emerald-300 hover:from-emerald-500/20 hover:to-teal-500/20"
+        >
+          <a
+            href="/app/sql"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open SQL Editor in a new tab"
+          >
+            <Code2 className="h-4 w-4" />
+            <span className="hidden sm:inline">SQL Editor</span>
+          </a>
+        </Button>
+
         {/* Theme toggle */}
         <Button
           variant="ghost"

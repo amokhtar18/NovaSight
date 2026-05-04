@@ -309,7 +309,7 @@ export function SchemaExplorer({
 
         {/* Tables List */}
         <ScrollArea className="flex-1" type="always">
-          <div className="p-2 min-w-max">
+          <div className="p-2">
             {error ? (
               <div className="text-center py-8 text-destructive text-sm">
                 <p className="font-medium">Failed to load schema</p>
@@ -397,13 +397,13 @@ function TableNode({
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
           )}
           <Table2 className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
-          <span className="truncate font-medium">{table.name}</span>
+          <span className="font-medium break-all min-w-0">{table.name}</span>
           {table.rowCount !== undefined && table.rowCount > 0 && (
             <span className="text-[10px] text-muted-foreground ml-1">
               ({table.rowCount.toLocaleString()} rows)
             </span>
           )}
-          <Badge variant="secondary" className="text-[10px] h-4 ml-auto">
+          <Badge variant="secondary" className="text-[10px] h-4 ml-auto flex-shrink-0">
             {table.columns.length} cols
           </Badge>
         </CollapsibleTrigger>
@@ -499,7 +499,7 @@ function ColumnNode({ column, tableName, onClick }: ColumnNodeProps) {
     <Tooltip>
       <TooltipTrigger asChild>
         <button
-          className="flex items-center gap-1.5 w-full px-2 py-1 text-xs rounded hover:bg-accent/50 text-left group"
+          className="flex items-center gap-1.5 w-full px-2 py-1 text-xs rounded hover:bg-accent/50 text-left group flex-wrap"
           onClick={() => onClick?.(tableName, column.name)}
         >
           {/* Key indicator */}
@@ -512,11 +512,11 @@ function ColumnNode({ column, tableName, onClick }: ColumnNodeProps) {
           )}
           
           {/* Column name */}
-          <span className="truncate flex-1 font-mono">{column.name}</span>
+          <span className="flex-1 min-w-0 font-mono break-all">{column.name}</span>
           
           {/* Data type badge */}
           <span className={cn(
-            "text-[10px] px-1.5 py-0.5 rounded bg-muted truncate max-w-[80px]",
+            "text-[10px] px-1.5 py-0.5 rounded bg-muted whitespace-normal break-all",
             typeColor
           )}>
             {column.type}

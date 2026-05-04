@@ -242,6 +242,28 @@ def list_warehouse_columns():
     return jsonify(columns)
 
 
+@api_v1_bp.route('/dbt/visual-models/by-name/<model_name>/columns', methods=['GET'])
+@authenticated
+@tenant_required
+@require_roles(['tenant_admin', 'data_engineer', 'analyst'])
+def list_visual_model_columns(model_name: str):
+    """List output columns for a saved dbt model by name.
+
+    Drives the SQL Builder's ref() column resolution: when a user picks
+    an upstream model in ``Reference Model`` mode, the SELECT / JOIN /
+    WHERE / GROUP BY builders need to know what columns that model
+    exposes. Resolves from ``VisualModel.visual_config['columns']`` first,
+    falling back to ClickHouse ``system.columns`` across the tenant's
+    dbt-managed layer databases.
+    """
+    tenant_id = _get_tenant_id()
+    if not model_name:
+        raise ValidationError("model_name path parameter required")
+    service = get_visual_model_service()
+    columns = service.list_model_columns(tenant_id, model_name)
+    return jsonify(columns)
+
+
 @api_v1_bp.route('/dbt/lake/tables', methods=['GET'])
 @authenticated
 @tenant_required
@@ -672,3 +694,97 @@ def import_models():
     service = get_export_import_service()
     result = service.import_models(tenant_id, data, on_conflict=on_conflict)
     return jsonify(result.to_dict()), 201
+
+
+# ─────────────────────────────────────────────────────────────────
+# Per-Model dbt Schedules (run / test / build)
+# ─────────────────────────────────────────────────────────────────
+
+
+@api_v1_bp.route(
+    '/dbt/visual-models/by-name/<model_name>/schedules',
+    methods=['GET'],
+)
+@authenticated
+@tenant_required
+@require_roles(['tenant_admin', 'data_engineer', 'analyst'])
+def list_model_schedules(model_name: str):
+    """List per-model dbt schedules (run / test / build) for the given model."""
+    from app.domains.transformation.application.dbt_schedule_service import (
+        get_dbt_model_schedule_service,
+    )
+
+    tenant_id = _get_tenant_id()
+    service = get_dbt_model_schedule_service()
+    rows = service.list_for_model(tenant_id, model_name)
+    return jsonify([r.to_dict() for r in rows])
+
+
+@api_v1_bp.route(
+    '/dbt/visual-models/by-name/<model_name>/schedules',
+    methods=['POST'],
+)
+@authenticated
+@tenant_required
+@require_roles(['tenant_admin', 'data_engineer'])
+def create_model_schedule(model_name: str):
+    """
+    Create a per-model dbt schedule.
+
+    Request body:
+        {
+          "command": "run" | "test" | "build",   # default "run"
+          "cron":    "0 2 * * *",                 # explicit cron OR
+          "preset":  "daily",                     # one of PRESET_TO_CRON
+          "is_active": true,
+          "description": ""
+        }
+    """
+    from app.domains.transformation.application.dbt_schedule_service import (
+        get_dbt_model_schedule_service,
+    )
+
+    tenant_id = _get_tenant_id()
+    payload = request.get_json() or {}
+    service = get_dbt_model_schedule_service()
+    row = service.create(tenant_id, model_name, payload)
+    return jsonify(row.to_dict()), 201
+
+
+@api_v1_bp.route(
+    '/dbt/visual-models/by-name/<model_name>/schedules/<schedule_id>',
+    methods=['PUT'],
+)
+@authenticated
+@tenant_required
+@require_roles(['tenant_admin', 'data_engineer'])
+def update_model_schedule(model_name: str, schedule_id: str):
+    """Update a per-model dbt schedule."""
+    from app.domains.transformation.application.dbt_schedule_service import (
+        get_dbt_model_schedule_service,
+    )
+
+    tenant_id = _get_tenant_id()
+    payload = request.get_json() or {}
+    service = get_dbt_model_schedule_service()
+    row = service.update(tenant_id, schedule_id, payload)
+    return jsonify(row.to_dict())
+
+
+@api_v1_bp.route(
+    '/dbt/visual-models/by-name/<model_name>/schedules/<schedule_id>',
+    methods=['DELETE'],
+)
+@authenticated
+@tenant_required
+@require_roles(['tenant_admin', 'data_engineer'])
+def delete_model_schedule(model_name: str, schedule_id: str):
+    """Delete a per-model dbt schedule."""
+    from app.domains.transformation.application.dbt_schedule_service import (
+        get_dbt_model_schedule_service,
+    )
+
+    tenant_id = _get_tenant_id()
+    service = get_dbt_model_schedule_service()
+    service.delete(tenant_id, schedule_id)
+    return jsonify({"id": schedule_id, "deleted": True})

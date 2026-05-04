@@ -1,14 +1,20 @@
 {% macro generate_schema_name(custom_schema_name, node) -%}
-    {# 
-        Custom schema name generation for NovaSight multi-tenant architecture.
-        Uses tenant database as schema to ensure proper tenant isolation.
-        
-        Args:
-            custom_schema_name: The custom schema defined in the model config
-            node: The dbt node being compiled
-            
-        Returns:
-            The tenant-specific database/schema name
-    #}
-    {{ var('tenant_database', target.schema) }}
+    {#-
+        NovaSight multi-tenant schema routing (tenant copy).
+
+        Mirrors dbt/macros/generate_schema_name.sql. Routes models with a
+        ``+schema:`` config into ``tenant_<slug>_<layer>`` databases:
+
+            staging      → tenant_<slug>_staging
+            intermediate → tenant_<slug>_intermediate
+            marts        → tenant_<slug>_marts
+
+        Models without a ``+schema:`` override land in ``tenant_<slug>``.
+    -#}
+    {%- set base = var('tenant_database', target.schema) -%}
+    {%- if custom_schema_name is none or (custom_schema_name | trim) == '' -%}
+        {{ base | trim }}
+    {%- else -%}
+        {{ base | trim }}_{{ custom_schema_name | trim }}
+    {%- endif -%}
 {%- endmacro %}

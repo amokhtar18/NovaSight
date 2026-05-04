@@ -31,7 +31,14 @@ export function ProtectedRoute({
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location.pathname }} replace />
+    const redirect = `${location.pathname}${location.search}${location.hash}`
+    return (
+      <Navigate
+        to={`/login?redirect=${encodeURIComponent(redirect)}`}
+        state={{ from: redirect }}
+        replace
+      />
+    )
   }
 
   // Role-based access control

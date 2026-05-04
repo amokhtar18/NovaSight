@@ -23,16 +23,13 @@ class TestDagsterClient:
     def test_graphql_url_construction(self):
         """Test GraphQL URL is constructed correctly."""
         from app.domains.orchestration.infrastructure.dagster_client import DagsterClient
-        
-        with patch('flask.current_app') as mock_app:
-            mock_app.config.get.side_effect = lambda key, default: default
-            
-            client = DagsterClient(
-                host="dagster-server",
-                port=3000,
-                use_infrastructure_config=False,
-            )
-            assert client.graphql_url == "http://dagster-server:3000/graphql"
+
+        client = DagsterClient(
+            host="dagster-server",
+            port=3000,
+            use_infrastructure_config=False,
+        )
+        assert client.graphql_url == "http://dagster-server:3000/graphql"
 
     def test_trigger_job_success(self):
         """Test trigger_job returns proper format on success."""
@@ -49,9 +46,8 @@ class TestDagsterClient:
                     }
                 }
             }
-            
-            with patch('flask.current_app'):
-                result = client.trigger_job("test_job")
+
+            result = client.trigger_job("test_job")
             
             assert result["success"] is True
             assert result["run_id"] == "test-run-123"
@@ -69,9 +65,8 @@ class TestDagsterClient:
                     "message": "Job not found",
                 }
             }
-            
-            with patch('flask.current_app'):
-                result = client.trigger_job("nonexistent_job")
+
+            result = client.trigger_job("nonexistent_job")
             
             assert result["success"] is False
             assert "error" in result
@@ -101,9 +96,8 @@ class TestDagsterClient:
                     ]
                 }
             }
-            
-            with patch('flask.current_app'):
-                runs = client.get_job_runs("test_job", limit=10)
+
+            runs = client.get_job_runs("test_job", limit=10)
             
             assert len(runs) == 2
             assert runs[0].run_id == "run-1"
@@ -125,9 +119,8 @@ class TestDagsterClient:
                     }
                 }
             }
-            
-            with patch('flask.current_app'):
-                result = client.start_schedule("test_schedule")
+
+            result = client.start_schedule("test_schedule")
             
             assert result["success"] is True
             assert result["status"] == "RUNNING"
@@ -146,9 +139,8 @@ class TestDagsterClient:
                     }
                 }
             }
-            
-            with patch('flask.current_app'):
-                result = client.stop_schedule("test_schedule")
+
+            result = client.stop_schedule("test_schedule")
             
             assert result["success"] is True
             assert result["status"] == "STOPPED"
@@ -165,9 +157,8 @@ class TestDagsterClient:
                     "loadStatus": "LOADED",
                 }
             }
-            
-            with patch('flask.current_app'):
-                result = client.reload_code_location()
+
+            result = client.reload_code_location()
             
             assert result["success"] is True
 
@@ -436,7 +427,7 @@ class TestAPICompatibility:
         mock_dag.full_dag_id = "test-tenant_test_dag"
         
         with patch.object(mock_dag_service, 'get_dag', return_value=mock_dag):
-            with patch('app.extensions.db'):
+            with patch('app.domains.orchestration.application.dag_service.db'):
                 result = mock_dag_service.pause_dag("test_dag")
         
         mock_dag_service.dagster_client.stop_schedule.assert_called_once()
@@ -453,7 +444,7 @@ class TestAPICompatibility:
         mock_dag.full_dag_id = "test-tenant_test_dag"
         
         with patch.object(mock_dag_service, 'get_dag', return_value=mock_dag):
-            with patch('app.extensions.db'):
+            with patch('app.domains.orchestration.application.dag_service.db'):
                 result = mock_dag_service.unpause_dag("test_dag")
         
         mock_dag_service.dagster_client.start_schedule.assert_called_once()

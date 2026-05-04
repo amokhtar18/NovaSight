@@ -5,7 +5,7 @@ novasight_novasight_demo:
       type: clickhouse
       schema: dbt_tenant_novasight_demo
       host: clickhouse
-      port: 9000
+      port: 8123
       user: default
       password: ''
       secure: false

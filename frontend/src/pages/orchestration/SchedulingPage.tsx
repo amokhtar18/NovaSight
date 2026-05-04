@@ -379,11 +379,18 @@ export function SchedulingPage() {
         actions={
           <>
             <InstanceStatus compact />
-            <Button variant="outline" onClick={handleOpenDagsterUI}>
+            <Button
+              variant="outline"
+              onClick={handleOpenDagsterUI}
+              className="border-border/60 bg-background/60 backdrop-blur-sm shadow-sm hover:bg-background hover:shadow-md transition-all"
+            >
               <ExternalLink className="mr-2 h-4 w-4" />
               Dagster UI
             </Button>
-            <Button asChild>
+            <Button
+              asChild
+              className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-md shadow-indigo-500/30 hover:from-indigo-600 hover:to-purple-700 hover:shadow-lg hover:shadow-indigo-500/40 transition-all"
+            >
               <Link to="/app/jobs/new">
                 <Plus className="mr-2 h-4 w-4" />
                 Create Job
@@ -537,7 +544,13 @@ export function SchedulingPage() {
                 <SelectItem value="paused">Paused</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="ghost" size="icon" onClick={refetchAll}>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={refetchAll}
+              className="hover:bg-indigo-50/60 hover:text-indigo-600 dark:hover:bg-indigo-500/10 transition-all"
+              title="Refresh"
+            >
               <RefreshCw className="h-4 w-4" />
             </Button>
           </div>
@@ -679,20 +692,31 @@ export function SchedulingPage() {
                   Configure a schedule on any pipeline, dbt model, or dbt test
                   to see it here.
                 </p>
-                <div className="flex gap-2">
-                  <Button asChild variant="outline">
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button
+                    asChild
+                    className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-md shadow-indigo-500/30 hover:from-indigo-600 hover:to-purple-700 hover:shadow-lg hover:shadow-indigo-500/40 transition-all"
+                  >
                     <Link to="/app/pipelines/new">
                       <Plus className="mr-2 h-4 w-4" />
                       New Pipeline
                     </Link>
                   </Button>
-                  <Button asChild variant="outline">
+                  <Button
+                    asChild
+                    variant="outline"
+                    className="border-border/60 hover:border-indigo-400/60 hover:text-indigo-600 hover:bg-indigo-50/40 dark:hover:bg-indigo-500/10 transition-all"
+                  >
                     <Link to="/app/jobs/new?kind=dbt_run">
                       <Plus className="mr-2 h-4 w-4" />
                       Schedule dbt run
                     </Link>
                   </Button>
-                  <Button asChild variant="outline">
+                  <Button
+                    asChild
+                    variant="outline"
+                    className="border-border/60 hover:border-indigo-400/60 hover:text-indigo-600 hover:bg-indigo-50/40 dark:hover:bg-indigo-500/10 transition-all"
+                  >
                     <Link to="/app/jobs/new?kind=dbt_test">
                       <Plus className="mr-2 h-4 w-4" />
                       Schedule dbt test
@@ -726,7 +750,7 @@ export function SchedulingPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-gradient-to-br from-red-500 to-rose-600 text-white shadow-md shadow-red-500/30 hover:from-red-600 hover:to-rose-700 hover:shadow-lg hover:shadow-red-500/40 transition-all"
               onClick={() =>
                 deleteTarget && deleteMutation.mutate(deleteTarget.id)
               }
@@ -858,7 +882,11 @@ function UnifiedRowItem({
       <TableCell className="text-right">
         <div className="flex items-center justify-end gap-1">
           {!job ? (
-            <Button variant="default" size="sm" asChild>
+            <Button
+              size="sm"
+              asChild
+              className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-sm shadow-indigo-500/25 hover:from-indigo-600 hover:to-purple-700 hover:shadow-md hover:shadow-indigo-500/40 transition-all"
+            >
               <Link
                 to={
                   pipeline
@@ -873,19 +901,24 @@ function UnifiedRowItem({
           ) : (
             <>
               <Button
-                variant="default"
                 size="sm"
                 onClick={() => onTrigger(job.id)}
                 disabled={triggerPending || job.status === 'archived'}
+                className="bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-sm shadow-emerald-500/25 hover:from-emerald-600 hover:to-green-700 hover:shadow-md hover:shadow-emerald-500/40 disabled:opacity-50 disabled:hover:shadow-sm transition-all"
               >
                 {triggerPending ? (
                   <Loader2 className="mr-1 h-3 w-3 animate-spin" />
                 ) : (
-                  <Play className="mr-1 h-3 w-3" />
+                  <Play className="mr-1 h-3 w-3 fill-current" />
                 )}
                 Run
               </Button>
-              <Button variant="outline" size="sm" asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                asChild
+                className="border-border/60 bg-background/60 hover:bg-background hover:border-indigo-400/60 hover:text-indigo-600 transition-all"
+              >
                 <Link to={`/app/jobs/${job.id}/edit`}>
                   <Settings className="mr-1 h-3 w-3" />
                   Schedule
@@ -893,7 +926,11 @@ function UnifiedRowItem({
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="hover:bg-muted/60 transition-colors"
+                  >
                     <MoreVertical className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -1009,7 +1046,10 @@ function EmptyState({ title, description, primary }: EmptyStateProps) {
         <Database className="h-12 w-12 text-muted-foreground mb-4" />
         <h3 className="text-lg font-medium mb-2">{title}</h3>
         <p className="text-muted-foreground text-center mb-4">{description}</p>
-        <Button asChild>
+        <Button
+          asChild
+          className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-md shadow-indigo-500/30 hover:from-indigo-600 hover:to-purple-700 hover:shadow-lg hover:shadow-indigo-500/40 transition-all"
+        >
           <Link to={primary.to}>
             <Plus className="mr-2 h-4 w-4" />
             {primary.label}

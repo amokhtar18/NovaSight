@@ -16,5 +16,5 @@ COPY . .
 # Expose Vite dev server port
 EXPOSE 5173
 
-# Start development server
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+# Ensure mounted node_modules stays in sync with package-lock on each container start.
+CMD ["sh", "-c", "npm ci && npm run dev -- --host 0.0.0.0"]

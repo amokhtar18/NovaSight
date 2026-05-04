@@ -36,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Initialise auth from persisted tokens on first mount
   useEffect(() => {
-    if (!store.isAuthenticated && !store.isLoading) {
+    if (!store.isAuthenticated) {
       store.initializeFromStorage()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -44,8 +44,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (credentials: LoginCredentials) => {
     await store.login(credentials.email, credentials.password)
-    const from = (location.state as { from?: string })?.from || '/app/dashboard'
-    navigate(from, { replace: true })
+    const stateFrom = (location.state as { from?: string })?.from
+    const params = new URLSearchParams(location.search)
+    const redirect = params.get('redirect')
+    const target = stateFrom || redirect || '/app/dashboard'
+    navigate(target, { replace: true })
   }
 
   const logout = () => {
